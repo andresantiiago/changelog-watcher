@@ -1,0 +1,10 @@
+{{- if include "cw.hasSeed" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cw.fullname" . }}-seed
+  labels: {{- include "cw.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- dict "environments" .Values.seed.environments "projects" .Values.seed.projects "webhooks" .Values.seed.webhooks | toYaml | nindent 4 }}
+{{- end }}

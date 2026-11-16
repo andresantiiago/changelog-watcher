@@ -1,0 +1,138 @@
+{{- $sqlite := and (not .Values.database.url) (not .Values.database.existingSecret) -}}
+{{- if and $sqlite (gt (int .Values.replicaCount) 1) }}
+{{- fail "SQLite suporta apenas replicaCount=1; configure database.url (PostgreSQL) para mais réplicas" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cw.fullname" . }}
+  labels: {{- include "cw.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- if $sqlite }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels: {{- include "cw.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cw.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      annotations:
+        checksum/seed: {{ dict "e" .Values.seed.environments "p" .Values.seed.projects "w" .Values.seed.webhooks | toJson | sha256sum }}
+        checksum/secret: {{ dict "s" .Values.secrets.values "a" .Values.auth "d" .Values.database.url | toJson | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      serviceAccountName: {{ include "cw.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: changelog-watcher
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            - name: PUBLIC_URL
+              value: {{ .Values.config.publicUrl | quote }}
+            - name: REFRESH_INTERVAL_MINUTES
+              value: {{ .Values.config.refreshIntervalMinutes | quote }}
+            - name: REFRESH_ON_STARTUP
+              value: {{ .Values.config.refreshOnStartup | quote }}
+            - name: REPORT_CRON
+              value: {{ .Values.config.reportCron | quote }}
+            - name: REPORT_DAYS
+              value: {{ .Values.config.reportDays | quote }}
+            - name: REPORT_SEND_ENABLED
+              value: {{ .Values.config.reportSendEnabled | quote }}
+            - name: MAX_RELEASE_PAGES
+              value: {{ .Values.config.maxReleasePages | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: SEED_OVERWRITE
+              value: {{ .Values.config.seedOverwrite | quote }}
+            {{- if include "cw.hasSeed" . }}
+            - name: CONFIG_FILE
+              value: /config/config.yaml
+            {{- end }}
+            {{- if $sqlite }}
+            - name: DATABASE_URL
+              value: sqlite:////data/changelog-watcher.db
+            {{- else if .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.existingSecretKey }}
+            {{- end }}
+            {{- if and .Values.auth.enabled .Values.auth.existingSecret }}
+            - name: AUTH_USERNAME
+              valueFrom: {secretKeyRef: {name: {{ .Values.auth.existingSecret }}, key: AUTH_USERNAME}}
+            - name: AUTH_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.auth.existingSecret }}, key: AUTH_PASSWORD}}
+            {{- end }}
+            {{- range $k, $v := .Values.config.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if or .Values.secrets.create .Values.secrets.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ include "cw.secretName" . }}
+                optional: true
+          {{- end }}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $sqlite }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+            {{- if include "cw.hasSeed" . }}
+            - name: seed
+              mountPath: /config
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $sqlite }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "cw.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- if include "cw.hasSeed" . }}
+        - name: seed
+          configMap:
+            name: {{ include "cw.fullname" . }}-seed
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
