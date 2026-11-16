@@ -50,15 +50,16 @@ def chat_lines(data: dict, max_items: int = 25) -> list[str]:
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            f"**{s['environment']}**: {_pct(s['up_to_date_ratio'])} atualizado · {s['total']} apps · "
-            f"🟡 {c['patch']} bugfix · 🟠 {c['minor']} minor · 🔴 {c['major']} major · ⚪ {c['unknown']} desconhecido · "
-            f"{s['libyears']:.1f} libyears"
+            f"**{s['environment']}**: {_pct(s['up_to_date_ratio'])} atualizado · {s['total']} apps · pendentes: "
+            f"🟡 {s['patch_pending']} bugfix · 🟠 {s['minor_pending']} minor · 🔴 {s['major_pending']} major"
+            + (f" · ⚪ {c['unknown']} sem versão" if c["unknown"] else "")
+            + f" · {s['libyears']:.1f} libyears"
         )
     releases = data["new_releases"]
     lines += ["", f"**Novas versões ({len(releases)})**"]
     for r in releases[:max_items]:
         tag = f"[{r['tag']}]({r['url']})" if r.get("url") else r["tag"]
-        lines.append(f"• {STATUS_ICON.get(r['level'], '')} {r['project']} {tag}")
+        lines.append(f"• {STATUS_ICON.get(r['level'], '•')} {r['project']} {tag}")
     if len(releases) > max_items:
         lines.append(f"• … e mais {len(releases) - max_items}")
     outdated = [o for o in data["outdated"] if o["status"] != "unknown"]

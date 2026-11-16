@@ -167,3 +167,21 @@ webhooks:
         assert load_seed(s, str(cfg)) == {"environments": 0, "projects": 0, "webhooks": 0}
     p = client.get("/api/projects").json()[0]
     assert p["deployments"][0]["version_source"] == "prometheus"
+
+
+def test_adds_missing_columns(tmp_path):
+    import sqlite3
+
+    from changelog_watcher import db as dbmod
+
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE projects (id INTEGER PRIMARY KEY, name VARCHAR(200), repository VARCHAR(500))")
+    con.execute("INSERT INTO projects (name, repository) VALUES ('a', 'o/r')")
+    con.commit()
+    con.close()
+    dbmod.init_engine(f"sqlite:///{path}")
+    cols = {r[1]: r for r in sqlite3.connect(path).execute("PRAGMA table_info(projects)")}
+    assert "version_scheme" in cols and "detection_mode" in cols
+    assert sqlite3.connect(path).execute("SELECT version_scheme, enabled FROM projects").fetchone() == ("semver", 1)
+    dbmod.init_engine("sqlite:///:memory:")

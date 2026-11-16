@@ -1,0 +1,164 @@
+image:
+  repository: ghcr.io/andresantiiago/changelog-watcher
+  tag: ""            # padrão: .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# A aplicação roda o agendador interno (refresh + relatório semanal).
+# Com SQLite use apenas 1 réplica. Para mais réplicas use PostgreSQL e
+# desative o agendador nas réplicas extras (ver README).
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: changelog-watcher.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------- aplicação
+config:
+  timezone: America/Sao_Paulo
+  # URL pública da interface, usada nos links do relatório.
+  publicUrl: ""
+  refreshIntervalMinutes: 360
+  refreshOnStartup: true
+  # Cron (5 campos) do relatório semanal – segunda 09:00.
+  reportCron: "0 9 * * mon"
+  reportDays: 7
+  reportSendEnabled: true
+  maxReleasePages: 3
+  logLevel: INFO
+  # Se true, o arquivo de seed (abaixo) sobrescreve alterações feitas pela UI.
+  seedOverwrite: false
+  # Variáveis extras (não secretas).
+  extraEnv: {}
+
+# Banco de dados. Vazio = SQLite no volume persistente.
+# Ex.: postgresql+psycopg://user:pass@host:5432/changelog_watcher
+# (prefira databaseUrlSecret para não expor a senha)
+database:
+  url: ""
+  existingSecret: ""      # Secret com a chave abaixo contendo a URL
+  existingSecretKey: DATABASE_URL
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  size: 1Gi
+  existingClaim: ""
+
+# Segredos expostos como variáveis de ambiente. Podem ser referenciados no
+# seed/UI com ${NOME}, ex.: prometheus_token: ${PROM_PROD_TOKEN}
+secrets:
+  create: true
+  # Usar um Secret já existente em vez de criar um.
+  existingSecret: ""
+  values: {}
+  #   GITHUB_TOKEN: ghp_xxx
+  #   GITLAB_TOKEN: glpat-xxx
+  #   PROM_PROD_TOKEN: xxx
+  #   SLACK_WEBHOOK_URL: https://hooks.slack.com/services/...
+
+# Autenticação básica opcional para a UI/API (/metrics e /healthz ficam abertos).
+auth:
+  enabled: false
+  username: admin
+  password: ""
+  existingSecret: ""      # chaves AUTH_USERNAME e AUTH_PASSWORD
+
+# Configuração inicial (seed) – ambientes, aplicações e webhooks.
+# É carregada a cada start; por padrão só cria o que não existe.
+seed:
+  environments: []
+  #  - name: desenvolvimento
+  #    prometheus_url: http://prometheus-dev.monitoring:9090
+  #  - name: producao
+  #    prometheus_url: https://thanos.empresa.com
+  #    prometheus_auth: bearer
+  #    prometheus_token: ${PROM_PROD_TOKEN}
+  #    prometheus_extra_selector: cluster="prod"
+  projects: []
+  #  - name: argo-cd
+  #    source_type: github_releases
+  #    repository: argoproj/argo-cd
+  #    detection_mode: workload
+  #    workload_kind: deployment
+  #    workload_namespace: argocd
+  #    workload_name: argocd-server
+  #    container_name: server
+  #    deployments:
+  #      desenvolvimento: {}            # versão via Prometheus
+  #      producao: {}
+  webhooks: []
+  #  - name: slack-plataforma
+  #    kind: slack
+  #    url: ${SLACK_WEBHOOK_URL}
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 60s
+    scrapeTimeout: 30s
+    labels: {}
+    # namespace: monitoring
+  prometheusRule:
+    enabled: false
+    labels: {}
+    # Alerta quando existe atualização major/minor pendente há mais de N dias.
+    outdatedDaysThreshold: 180
+
+grafana:
+  dashboard:
+    # Cria um ConfigMap com o dashboard para o sidecar do Grafana.
+    enabled: false
+    namespace: ""
+    labels:
+      grafana_dashboard: "1"
+    annotations: {}
+    #  grafana_folder: Plataforma

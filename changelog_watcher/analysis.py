@@ -382,6 +382,8 @@ def _release_level(v: Version, currents: list[Version | None]) -> str:
     currents = [c for c in currents if c]
     if not currents:
         return STATUS_UNKNOWN
+    if all(v < c for c in currents):
+        return "older"  # new release of an older line (e.g. LTS backport)
     level = STATUS_UP_TO_DATE
     for c in currents:
         if v <= c:

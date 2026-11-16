@@ -1,0 +1,7 @@
+apiVersion: v2
+name: changelog-watcher
+description: Monitora releases/changelogs, compara com as versões implantadas em cada ambiente e gera relatórios, métricas e dashboard.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [releases, changelog, versions, prometheus, grafana]

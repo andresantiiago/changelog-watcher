@@ -187,14 +187,16 @@ function stackedBars(el, rows, keys, colorOf, labelOf) {
   registerChart(() => {
     if (!el.isConnected) return;
     const W = Math.max(el.clientWidth, 280);
-    const labelW = Math.min(150, W * 0.3);
+    const labelW = Math.min(150, Math.max(90, W * 0.3));
+    const maxChars = Math.floor((labelW - 10) / 7);
+    const short = (t) => (t.length > maxChars ? `${t.slice(0, maxChars - 1)}…` : t);
     const rowH = 28, gap = 14, barW = W - labelW - 50;
     const H = rows.length * (rowH + gap);
     let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Distribuição de status por ambiente">`;
     rows.forEach((row, ri) => {
       const y = ri * (rowH + gap);
       const total = keys.reduce((a, k) => a + (row.values[k] || 0), 0);
-      svg += `<text class="lbl" x="0" y="${y + rowH / 2 + 4}">${esc(row.label)}</text>`;
+      svg += `<text class="lbl" x="0" y="${y + rowH / 2 + 4}"><title>${esc(row.label)}</title>${esc(short(row.label))}</text>`;
       svg += `<text x="${W}" y="${y + rowH / 2 + 4}" text-anchor="end">${total}</text>`;
       if (!total) {
         svg += `<rect x="${labelW}" y="${y}" width="${barW}" height="${rowH}" rx="4" fill="var(--surface-2)"/>`;
@@ -788,7 +790,7 @@ async function viewReleases(view) {
     <div class="filters"><div class="seg">${[7, 14, 30, 90].map((d) => `<button type="button" data-days="${d}" class="${st.days === d ? "on" : ""}">${d} dias</button>`).join("")}</div>
       <span class="muted">${list.length} versões publicadas</span></div>
     <div class="card">${list.map((r) => `<div class="release">
-      <div class="head"><a href="#/apps/${r.project_id}"><b>${esc(r.project)}</b></a><span class="ver">${esc(r.tag)}</span>${badge(r.level, r.level === "up_to_date" ? "Já em uso" : r.level === "unknown" ? "Sem versão em uso" : STATUS[r.level].short)}
+      <div class="head"><a href="#/apps/${r.project_id}"><b>${esc(r.project)}</b></a><span class="ver">${esc(r.tag)}</span>${r.level === "older" ? badge("unknown", "Linha anterior") : badge(r.level, r.level === "up_to_date" ? "Já em uso" : r.level === "unknown" ? "Sem versão em uso" : `${STATUS[r.level].short} p/ o ambiente`)}
       <span class="small muted">${fmtDate(r.published_at)}</span>${r.url ? `<a class="small" href="${esc(r.url)}" target="_blank" rel="noopener">abrir ↗</a>` : ""}</div>
       <div class="small muted">${Object.entries(r.deployed).map(([env, v]) => `${esc(env)}: <span class="ver">${esc(v || "?")}</span>`).join(" · ") || "não implantado"}</div>
       ${r.notes ? `<details><summary>Notas da versão</summary><div class="notes">${md(r.notes)}</div></details>` : ""}

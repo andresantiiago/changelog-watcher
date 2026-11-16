@@ -1,0 +1,8 @@
+.git
+**/__pycache__
+*.db
+*.db-*
+data/
+tests/
+deploy/
+.pytest_cache
