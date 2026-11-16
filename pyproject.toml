@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "changelog-watcher"
+version = "0.1.0"
+description = "Monitora changelogs/releases de aplicações, compara com as versões implantadas em cada ambiente e gera relatórios, métricas e alertas."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
+    "httpx>=0.27",
+    "prometheus-client>=0.20",
+    "apscheduler>=3.10,<4",
+    "pyyaml>=6",
+    "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=8", "respx>=0.21"]
+
+[project.scripts]
+changelog-watcher = "changelog_watcher.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["changelog_watcher*"]
+
+[tool.setuptools.package-data]
+changelog_watcher = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
