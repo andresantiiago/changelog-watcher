@@ -1,0 +1,95 @@
+# Configuração inicial (seed) do changelog-watcher.
+# Carregada no startup quando CONFIG_FILE aponta para este arquivo.
+# Por padrão só cria o que não existe (a UI passa a ser a dona dos dados);
+# com SEED_OVERWRITE=true o arquivo sobrescreve os campos declarados.
+#
+# Valores no formato ${VARIAVEL} são lidos do ambiente no momento do uso,
+# então tokens e URLs de webhook podem vir de um Secret do Kubernetes.
+
+environments:
+  - name: desenvolvimento
+    description: Cluster de desenvolvimento
+    prometheus_url: http://prometheus-dev.monitoring:9090
+
+  - name: producao
+    description: Cluster de produção (Thanos com vários clusters)
+    prometheus_url: https://thanos.empresa.com
+    prometheus_auth: bearer               # none | bearer | basic
+    prometheus_token: ${PROM_PROD_TOKEN}
+    prometheus_extra_selector: cluster="prod"   # adicionado a todas as queries
+    prometheus_verify_tls: true
+
+projects:
+  # Releases do GitHub; versão em uso descoberta pelo Deployment no cluster.
+  - name: argo-cd
+    tags: [plataforma]
+    source_type: github_releases
+    repository: argoproj/argo-cd
+    detection_mode: workload              # none | workload | image | query
+    workload_kind: deployment             # deployment | statefulset | daemonset | cronjob
+    workload_namespace: argocd
+    workload_name: argocd-server
+    container_name: server
+    deployments:
+      desenvolvimento: {}                 # versão via Prometheus
+      producao: {}
+
+  # Detecção por imagem: qualquer pod rodando ghcr.io/.../cert-manager-controller
+  - name: cert-manager
+    source_type: github_releases
+    repository: cert-manager/cert-manager
+    detection_mode: image
+    image_pattern: quay.io/jetstack/cert-manager-controller
+    deployments:
+      desenvolvimento: {}
+      producao: {}
+
+  # Monorepo: filtra as tags do chart com tag_pattern
+  - name: kube-prometheus-stack
+    source_type: helm_index
+    repository: https://prometheus-community.github.io/helm-charts
+    chart_name: kube-prometheus-stack
+    deployments:
+      producao: {version_source: manual, manual_version: "65.1.0"}
+
+  # Imagem do Docker Hub; PostgreSQL usa "major.bugfix" (16.2 -> 16.9 é bugfix)
+  - name: postgres
+    source_type: dockerhub
+    repository: library/postgres
+    version_scheme: major_patch
+    detection_mode: workload
+    workload_kind: statefulset
+    workload_namespace: database
+    workload_name: postgres
+    deployments:
+      producao: {}
+      desenvolvimento: {namespace_override: database-dev}
+
+  # Projeto sem releases, só com CHANGELOG.md
+  - name: minha-api
+    source_type: changelog
+    repository: https://github.com/minha-org/minha-api/blob/main/CHANGELOG.md
+    deployments:
+      producao: "2.3.1"                   # atalho para versão manual
+
+  # GitLab self-hosted com tags; notas complementadas pelo CHANGELOG
+  - name: servico-interno
+    source_type: gitlab_tags
+    repository: plataforma/servico-interno
+    source_url: https://gitlab.empresa.com
+    changelog_url: https://gitlab.empresa.com/plataforma/servico-interno/-/raw/main/CHANGELOG.md
+    detection_mode: query
+    promql_query: kube_pod_container_info{namespace="{namespace}", container="app", pod=~"servico-interno-.*"}
+    workload_namespace: servicos
+    deployments:
+      producao: {}
+
+webhooks:
+  - name: slack-plataforma
+    kind: slack                           # generic | slack | teams | discord | google_chat
+    url: ${SLACK_WEBHOOK_URL}
+  - name: teams-producao
+    kind: teams
+    url: ${TEAMS_WEBHOOK_URL}
+    environments: [producao]              # só inclui estes ambientes
+    only_outdated: true                   # não envia se estiver tudo atualizado

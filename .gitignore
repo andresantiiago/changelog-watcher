@@ -221,3 +221,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# changelog-watcher local data
+data/
+*.db
+*.db-shm
+*.db-wal

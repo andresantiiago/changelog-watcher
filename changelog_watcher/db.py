@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import contextmanager
 from typing import Iterator
@@ -8,6 +9,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import get_settings
+
+log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -46,7 +49,31 @@ def init_engine(url: str | None = None):
     from . import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(_engine)
+    _add_missing_columns(_engine)
     return _engine
+
+
+def _add_missing_columns(engine) -> None:
+    """Minimal forward-only migration: add columns introduced by newer versions.
+
+    New columns must be nullable or have a scalar default.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in existing:
+                    continue
+                ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col.type.compile(engine.dialect)}'
+                default = col.default.arg if col.default is not None and col.default.is_scalar else None
+                if default is not None:
+                    literal = int(default) if isinstance(default, bool) else default
+                    ddl += f" DEFAULT {literal!r}" if isinstance(literal, str) else f" DEFAULT {literal}"
+                conn.execute(text(ddl))
+                log.info("added column %s.%s", table.name, col.name)
 
 
 def get_engine():

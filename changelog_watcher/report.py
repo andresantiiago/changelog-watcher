@@ -24,7 +24,7 @@ STATUS_LABEL = {
     "major": "Major disponível",
     "unknown": "Desconhecido",
 }
-STATUS_ICON = {"up_to_date": "✅", "patch": "🟡", "minor": "🟠", "major": "🔴", "unknown": "⚪"}
+STATUS_ICON = {"up_to_date": "✅", "patch": "🟡", "minor": "🟠", "major": "🔴", "unknown": "⚪", "older": "▫️"}
 
 
 def build_report_data(session: Session, days: int | None = None, environment_ids: list[int] | None = None,
@@ -79,13 +79,15 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
 
     lines.append("## Resumo por ambiente")
     lines.append("")
-    lines.append("| Ambiente | Atualizado | Apps | Bugfix | Minor | Major | Desconhecido | Libyears | Média dias desatualizado |")
+    lines.append("| Ambiente | Atualizado | Apps | Com bugfix pendente | Com minor pendente | Com major pendente "
+                 "| Sem versão | Libyears | Atraso médio (dias) |")
     lines.append("|---|---|---|---|---|---|---|---|---|")
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {s['total']} | {c['patch']} | {c['minor']} | "
-            f"{c['major']} | {c['unknown']} | {s['libyears']:.2f} | {s['avg_outdated_days']:.0f} |"
+            f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {s['total']} | {s['patch_pending']} | "
+            f"{s['minor_pending']} | {s['major_pending']} | {c['unknown']} | {s['libyears']:.2f} | "
+            f"{s['avg_outdated_days']:.0f} |"
         )
     lines.append("")
 
@@ -95,7 +97,7 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
     if not releases:
         lines.append("_Nenhuma nova versão publicada no período._")
     for r in releases[:max_releases]:
-        icon = STATUS_ICON.get(r["level"], "")
+        icon = STATUS_ICON.get(r["level"], "•")
         link = f"[{r['tag']}]({r['url']})" if r.get("url") else r["tag"]
         deployed = ", ".join(f"{env}: {v or '?'}" for env, v in r["deployed"].items()) or "não implantado"
         lines.append(f"- {icon} **{r['project']}** {link} — {r['published_at'][:10] if r['published_at'] else ''} ({deployed})")
