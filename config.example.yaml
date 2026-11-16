@@ -20,16 +20,15 @@ environments:
     prometheus_verify_tls: true
 
 projects:
-  # Releases do GitHub; versão em uso descoberta pelo Deployment no cluster.
+  # Releases do GitHub; versão em uso = todos os workloads do release Helm "argocd".
   - name: argo-cd
     tags: [plataforma]
-    source_type: github_releases
+    source_type: github_releases          # ... | changelog | webpage (URL de uma página com as versões)
     repository: argoproj/argo-cd
-    detection_mode: workload              # none | workload | image | query
-    workload_kind: deployment             # deployment | statefulset | daemonset | cronjob
+    detection_mode: helm                  # none | workload | helm | image | query
     workload_namespace: argocd
-    workload_name: argocd-server
-    container_name: server
+    workload_name: argocd                 # nome do release (no modo workload, o do Deployment)
+    image_pattern: quay.io/argoproj/argocd  # ignora redis/dex do mesmo release
     deployments:
       desenvolvimento: {}                 # versão via Prometheus
       producao: {}

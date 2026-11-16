@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .sources import SOURCE_TYPES
 
 SourceType = Literal[tuple(SOURCE_TYPES)]  # type: ignore[valid-type]
-DetectionMode = Literal["none", "workload", "image", "query"]
+DetectionMode = Literal["none", "workload", "helm", "image", "query"]
 WorkloadKind = Literal["deployment", "statefulset", "daemonset", "cronjob"]
 VersionSource = Literal["manual", "prometheus"]
 WebhookKind = Literal["generic", "slack", "teams", "discord", "google_chat"]
@@ -92,32 +92,12 @@ class ProjectIn(BaseModel):
     _tag = field_validator("tag_pattern", "image_version_pattern")(_check_regex)
 
 
-class ProjectOut(BaseModel):
+class ProjectOut(ProjectIn):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    name: str
-    description: str | None
-    enabled: bool
-    tags: list[str]
-    source_type: str
-    repository: str
-    source_url: str | None
-    chart_name: str | None
-    use_app_version: bool
-    tag_pattern: str | None
-    version_scheme: str
-    include_prerelease: bool
-    changelog_url: str | None
-    detection_mode: str
-    workload_kind: str
-    workload_namespace: str | None
-    workload_name: str | None
-    container_name: str | None
-    image_pattern: str | None
-    promql_query: str | None
-    image_version_pattern: str | None
-    last_checked_at: datetime | None
-    last_error: str | None
+    repository: str  # no min_length: seeded projects may lack one
+    last_checked_at: datetime | None = None
+    last_error: str | None = None
     release_count: int = 0
     deployments: list[DeploymentOut] = Field(default_factory=list)
 

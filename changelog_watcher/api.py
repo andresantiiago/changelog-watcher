@@ -77,6 +77,7 @@ def meta():
         "detection_modes": {
             "none": "Sem detecção (versão manual)",
             "workload": "Workload (Deployment/StatefulSet/DaemonSet)",
+            "helm": "Release Helm (todos os workloads do release)",
             "image": "Padrão de imagem",
             "query": "Consulta PromQL personalizada",
         },
@@ -144,13 +145,25 @@ async def test_environment(env_id: int, db: Session = Depends(get_db)):
         return {"ok": False, "error": str(exc)}
 
 
+@router.get("/environments/{env_id}/discover")
+async def discover_environment(env_id: int, namespace: str | None = None, db: Session = Depends(get_db)):
+    """Workloads of a namespace grouped by Helm release, with the project that already tracks each group."""
+    env = _get(db, Environment, env_id)
+    try:
+        groups = await prom.discover(env, (namespace or "").strip() or None)
+    except prom.PrometheusError as exc:
+        return {"ok": False, "error": str(exc)}
+    tracked = {(p.workload_namespace, p.workload_name): p for p in db.scalars(select(Project))}
+    for g in groups:
+        s = g["suggestion"]
+        p = tracked.get((s["workload_namespace"], s.get("workload_name")))
+        g["project"] = {"id": p.id, "name": p.name} if p else None
+    return {"ok": True, "groups": groups}
+
+
 # --------------------------------------------------------------- projects
-def _project_out(p: Project, release_count: int | None = None) -> dict:
-    data = ProjectOut.model_validate(
-        {**{c: getattr(p, c) for c in ProjectOut.model_fields if c not in ("deployments", "release_count")},
-         "deployments": [d for d in p.deployments], "release_count": release_count or 0}
-    ).model_dump()
-    return data
+def _project_out(p: Project, release_count: int = 0) -> dict:
+    return ProjectOut.model_validate(p).model_dump() | {"release_count": release_count}
 
 
 def _release_counts(db: Session) -> dict[int, int]:
@@ -167,7 +180,7 @@ def _apply_project(db: Session, project: Project, body: ProjectIn) -> None:
         setattr(project, key, value)
     if body.deployments is None:
         return
-    db.flush()
+    _commit(db)  # project.id is needed below; duplicate names become a 409
     env_ids = {e.id for e in db.scalars(select(Environment))}
     existing = {d.environment_id: d for d in project.deployments}
     for env_id, dep_in in body.deployments.items():
@@ -208,23 +221,14 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 @router.post("/projects", status_code=201)
 async def create_project(body: ProjectIn, refresh: bool = True, db: Session = Depends(get_db)):
     project = Project(deployments=[])
-    _apply_project_new(db, project, body)
+    db.add(project)
+    _apply_project(db, project, body)
+    _commit(db)
     out = _project_out(project)
     db.commit()
     if refresh:
         _spawn(run_refresh(project_ids=[project.id]))
     return out
-
-
-def _apply_project_new(db: Session, project: Project, body: ProjectIn) -> None:
-    deployments = body.deployments
-    body = body.model_copy(update={"deployments": None})
-    _apply_project(db, project, body)
-    db.add(project)
-    _commit(db)
-    if deployments is not None:
-        _apply_project(db, project, body.model_copy(update={"deployments": deployments}))
-        _commit(db)
 
 
 @router.put("/projects/{project_id}")

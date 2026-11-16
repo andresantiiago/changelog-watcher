@@ -570,9 +570,9 @@ async function viewApps(view) {
   $("#new-app", view).addEventListener("click", () => projectForm());
 }
 
-function projectForm(p = null) {
-  const isNew = !p;
-  p = p || { source_type: "github_releases", version_scheme: "semver", detection_mode: "none", workload_kind: "deployment", enabled: true, tags: [], deployments: [] };
+/** ``p`` is an existing project, or (with isNew) a prefill such as a discovery suggestion. */
+function projectForm(p = null, isNew = !p) {
+  if (isNew) p = { source_type: "github_releases", version_scheme: "semver", detection_mode: "none", workload_kind: "deployment", enabled: true, tags: [], deployments: [], ...p };
   const deps = Object.fromEntries((p.deployments || []).map((d) => [d.environment_id, d]));
   const st = S.meta.source_types;
   const body = `
@@ -584,7 +584,7 @@ function projectForm(p = null) {
     </div></fieldset>
     <fieldset><legend>Fonte do changelog / releases</legend><div class="form-grid">
       ${field("Tipo de fonte", `<select name="source_type">${Object.entries(st).map(([k, v]) => opt(k, v, p.source_type)).join("")}</select>`)}
-      ${field("Repositório *", inp("repository", p.repository, 'required placeholder="argoproj/argo-cd"'), '<span id="repo-hint"></span>')}
+      ${field("Repositório / URL *", inp("repository", p.repository, 'required placeholder="argoproj/argo-cd"'), '<span id="repo-hint"></span>')}
       <div data-show="helm_index">${field("Nome do chart", inp("chart_name", p.chart_name))}</div>
       <div data-show="helm_index"><label class="check" style="margin-top:22px"><input type="checkbox" name="use_app_version" ${p.use_app_version ? "checked" : ""}> Comparar pelo appVersion</label></div>
       <div data-show="github_releases github_tags gitlab_releases gitlab_tags">${field("URL da API (opcional)", inp("source_url", p.source_url, 'placeholder="https://github.empresa.com/api/v3"'), "GitHub Enterprise ou GitLab self-hosted")}</div>
@@ -596,20 +596,21 @@ function projectForm(p = null) {
     <fieldset><legend>Descobrir versão em uso via Prometheus</legend><div class="form-grid">
       ${field("Modo de detecção", `<select name="detection_mode">${Object.entries(S.meta.detection_modes).map(([k, v]) => opt(k, v, p.detection_mode)).join("")}</select>`, "usa <code>kube_pod_container_info</code> do kube-state-metrics", "full")}
       <div data-mode="workload">${field("Tipo de workload", `<select name="workload_kind">${["deployment", "statefulset", "daemonset", "cronjob"].map((k) => opt(k, k, p.workload_kind)).join("")}</select>`)}</div>
-      <div data-mode="workload image query">${field("Namespace", inp("workload_namespace", p.workload_namespace))}</div>
-      <div data-mode="workload query">${field("Nome do workload", inp("workload_name", p.workload_name))}</div>
-      <div data-mode="workload image">${field("Container", inp("container_name", p.container_name), "opcional")}</div>
-      <div data-mode="image" class="full">${field("Imagem", inp("image_pattern", p.image_pattern, 'placeholder="quay.io/argoproj/argocd"'), "repositório da imagem ou regex")}</div>
+      <div data-mode="workload helm image query">${field("Namespace", inp("workload_namespace", p.workload_namespace))}</div>
+      <div data-mode="workload helm query">${field("Nome do workload / release Helm", inp("workload_name", p.workload_name), "no modo Helm, todos os workloads do release são considerados")}</div>
+      <div data-mode="workload helm image">${field("Container", inp("container_name", p.container_name), "opcional")}</div>
+      <div data-mode="helm image" class="full">${field("Imagem", inp("image_pattern", p.image_pattern, 'placeholder="quay.io/argoproj/argocd"'), "repositório da imagem ou regex – no modo Helm (opcional) escolhe qual imagem do release define a versão")}</div>
       <div data-mode="query" class="full">${field("Consulta PromQL", `<textarea name="promql_query" placeholder='kube_pod_container_info{namespace="{namespace}", container="app"}'>${esc(p.promql_query || "")}</textarea>`, "as séries devem ter o label <code>image</code> (ou <code>version</code>); {namespace} e {name} são substituídos")}</div>
-      <div data-mode="workload image query" class="full">${field("Padrão de versão na tag da imagem (regex)", inp("image_version_pattern", p.image_version_pattern), "opcional, ex: <code>^v?(\\d+\\.\\d+\\.\\d+)</code>")}</div>
+      <div data-mode="workload helm image query" class="full">${field("Padrão de versão na tag da imagem (regex)", inp("image_version_pattern", p.image_version_pattern), "opcional, ex: <code>^v?(\\d+\\.\\d+\\.\\d+)</code>")}</div>
     </div></fieldset>
     <fieldset><legend>Ambientes</legend>
       ${S.envs.length ? `<div class="table-wrap"><table><thead><tr><th>Ambiente</th><th>Implantado</th><th>Origem da versão</th><th>Versão manual</th><th>Namespace (sobrescrever)</th><th>Workload (sobrescrever)</th></tr></thead><tbody>
       ${S.envs.map((e) => {
         const d = deps[e.id];
+        const src = d?.version_source || (p.detection_mode !== "none" && e.prometheus_url ? "prometheus" : "manual");
         return `<tr data-dep="${e.id}"><td><b>${esc(e.name)}</b>${e.prometheus_url ? "" : '<div class="small muted">sem Prometheus</div>'}</td>
           <td><input type="checkbox" data-skip="1" data-f="on" ${d || isNew ? "checked" : ""}></td>
-          <td><select data-skip="1" data-f="version_source">${opt("manual", "Manual", d?.version_source || (p.detection_mode !== "none" && e.prometheus_url ? "prometheus" : "manual"))}${opt("prometheus", "Prometheus", d?.version_source)}</select></td>
+          <td><select data-skip="1" data-f="version_source">${opt("manual", "Manual", src)}${opt("prometheus", "Prometheus", src)}</select></td>
           <td><input data-skip="1" data-f="manual_version" value="${esc(d?.manual_version || "")}" placeholder="1.2.3" style="width:110px"></td>
           <td><input data-skip="1" data-f="namespace_override" value="${esc(d?.namespace_override || "")}" style="width:140px"></td>
           <td><input data-skip="1" data-f="workload_name_override" value="${esc(d?.workload_name_override || "")}" style="width:140px"></td></tr>`;
@@ -643,6 +644,7 @@ function projectForm(p = null) {
     github_releases: "owner/repo", github_tags: "owner/repo", gitlab_releases: "grupo/projeto", gitlab_tags: "grupo/projeto",
     helm_index: "URL do repositório Helm, ex: https://argoproj.github.io/argo-helm", dockerhub: "imagem, ex: library/nginx ou bitnami/redis",
     changelog: "URL do CHANGELOG.md (raw ou github.com/.../blob/...)",
+    webpage: "URL da página que lista as versões – use o padrão de tag para ignorar outras versões citadas",
   };
   const sync = () => {
     const src = $("[name=source_type]", form).value, mode = $("[name=detection_mode]", form).value;
@@ -726,7 +728,7 @@ async function viewAppDetail(view, id) {
     out.textContent = "Consultando Prometheus…";
     const r = await api(`/api/projects/${p.id}/detect?environment_id=${b.dataset.detect}`, { method: "POST" });
     out.innerHTML = r.ok
-      ? `✅ Versão <b class="ver">${esc(r.version)}</b> (${esc(r.image)})<br><span class="mono muted">${esc(r.query)}</span>`
+      ? `✅ Versão <b class="ver">${esc(r.version)}</b> (${esc(r.image)})${Object.keys(r.images).length > 1 ? `<div>${Object.entries(r.images).map(([img, n]) => `<div class="mono">${n}× ${esc(img)}</div>`).join("")}</div>` : "<br>"}<span class="mono muted">${esc(r.query)}</span>`
       : `<span class="err">⚠ ${esc(r.error)}</span>${r.query ? `<br><span class="mono muted">${esc(r.query)}</span>` : ""}`;
   }));
 }
@@ -955,10 +957,56 @@ function hookForm(w = null) {
   });
 }
 
+// -------------------------------------------------------------- discover
+async function viewDiscover(view) {
+  const envs = S.envs.filter((e) => e.prometheus_url);
+  if (!envs.length) { view.innerHTML = `<div class="card empty">Configure o Prometheus de um <a href="#/environments">ambiente</a> para descobrir as aplicações do cluster.</div>`; return; }
+  const st = viewDiscover.state ||= { env: envs[0].id, namespace: "", result: null };
+  view.innerHTML = `
+    <form class="card filters" id="dc-form" style="margin-bottom:16px">
+      ${field("Ambiente", `<select id="dc-env">${envs.map((e) => opt(e.id, e.name, st.env)).join("")}</select>`)}
+      ${field("Namespace", `<input id="dc-ns" value="${esc(st.namespace)}" placeholder="vazio = todos">`)}
+      <button class="btn primary" type="submit" style="margin-top:18px">Descobrir</button>
+      <span class="small muted" style="margin-top:18px">Agrupa os workloads por release Helm (Secrets <code>sh.helm.release.v1.*</code> e label <code>app.kubernetes.io/instance</code>).</span>
+    </form>
+    <div id="dc-out"></div>`;
+  const out = $("#dc-out", view);
+  const draw = () => {
+    const r = st.result;
+    if (!r) return;
+    if (!r.ok) { out.innerHTML = `<div class="card err">⚠ ${esc(r.error)}</div>`; return; }
+    out.innerHTML = r.groups.map((g, i) => `<div class="card" style="margin-bottom:12px">
+      <div class="card-head"><div>
+        <div class="row"><h2 style="margin:0">${esc(g.release || g.workloads[0].name)}</h2>
+          ${g.release ? `<span class="chip">${g.helm ? `Helm${g.revision ? ` rev ${g.revision}` : ""}` : "release (label)"}</span>` : '<span class="chip">sem Helm</span>'}
+          ${g.chart ? `<span class="chip">${esc(g.chart)}</span>` : ""}<span class="small muted">${esc(g.namespace)}</span></div>
+        <div class="small muted" style="margin-top:4px">${g.workloads.length} workload(s) · versão ${ver(g.version)} ${g.image ? `<span class="mono">${esc(g.image)}</span>` : ""}</div>
+      </div>
+      ${g.project ? `<a class="btn sm" href="#/apps/${g.project.id}">Monitorada: ${esc(g.project.name)}</a>` : `<button class="btn sm primary" type="button" data-track="${i}">Monitorar</button>`}</div>
+      <details><summary class="small">Workloads e imagens</summary><div class="table-wrap"><table><tbody>
+        ${g.workloads.map((w) => `<tr><td class="nowrap"><span class="muted small">${esc(w.kind)}</span> <b>${esc(w.name)}</b></td><td>${w.containers.map((c) => `<div class="small"><span class="muted">${esc(c.container)}</span> <span class="mono">${esc(c.image)}</span></div>`).join("")}</td></tr>`).join("")}
+      </tbody></table></div></details>
+    </div>`).join("") || `<div class="card empty">Nenhum container encontrado.</div>`;
+    $$("[data-track]", out).forEach((b) => b.addEventListener("click", () => projectForm(r.groups[Number(b.dataset.track)].suggestion, true)));
+  };
+  $("#dc-form", view).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    st.env = Number($("#dc-env", view).value);
+    st.namespace = $("#dc-ns", view).value.trim();
+    out.innerHTML = `<div class="card muted">Consultando Prometheus…</div>`;
+    try {
+      st.result = await api(`/api/environments/${st.env}/discover?namespace=${encodeURIComponent(st.namespace)}`);
+    } catch (err) { st.result = { ok: false, error: err.message }; }
+    draw();
+  });
+  draw();
+}
+
 // ---------------------------------------------------------------- router
 const ROUTES = {
   dashboard: ["Dashboard", viewDashboard],
   apps: ["Aplicações", viewApps],
+  discover: ["Descobrir no cluster", viewDiscover],
   compare: ["Comparar ambientes", viewCompare],
   releases: ["Novas versões", viewReleases],
   reports: ["Relatórios", viewReports],

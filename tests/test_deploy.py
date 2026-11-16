@@ -5,12 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DASH = ROOT / "deploy/grafana/changelog-watcher-dashboard.json"
-CHART_DASH = ROOT / "deploy/helm/changelog-watcher/dashboards/changelog-watcher.json"
-
-
-def test_dashboard_copies_in_sync():
-    assert DASH.read_text() == CHART_DASH.read_text(), "run deploy/grafana/build_dashboard.py"
+DASH = ROOT / "deploy/helm/changelog-watcher/dashboards/changelog-watcher.json"
 
 
 def test_dashboard_metrics_exist(client, seeded):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 
 
@@ -38,7 +38,6 @@ class Settings:
     scheduler_enabled: bool = True
     metrics_cache_seconds: int = 30
     log_level: str = "INFO"
-    extra: dict = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> "Settings":

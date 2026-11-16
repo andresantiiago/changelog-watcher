@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import total_ordering
 from typing import Iterable
 
 _PRE_KEYWORDS = "alpha|beta|rc|pre|preview|dev|snapshot|milestone|nightly|canary|a|b|m"
@@ -30,6 +31,7 @@ _VERSION_RE = re.compile(
 )
 
 
+@total_ordering
 @dataclass(frozen=True, eq=False)
 class Version:
     major: int
@@ -58,15 +60,6 @@ class Version:
 
     def __lt__(self, other: "Version") -> bool:
         return self._key() < other._key()
-
-    def __le__(self, other: "Version") -> bool:
-        return self._key() <= other._key()
-
-    def __gt__(self, other: "Version") -> bool:
-        return self._key() > other._key()
-
-    def __ge__(self, other: "Version") -> bool:
-        return self._key() >= other._key()
 
     def __hash__(self) -> int:
         return hash(self._key())

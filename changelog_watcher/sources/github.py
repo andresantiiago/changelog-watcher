@@ -4,6 +4,7 @@ import asyncio
 
 import httpx
 
+from ..versioning import parse_version
 from .base import ReleaseData, SourceError, get_json, parse_datetime
 
 
@@ -84,8 +85,6 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: 
             )
         if len(items) < 100:
             break
-
-    from ..versioning import parse_version
 
     missing = [t for t in tags if t.published_at is None and t.commit_sha]
     missing.sort(key=lambda t: parse_version(t.tag, project.tag_pattern) or parse_version("0.0.0"), reverse=True)
