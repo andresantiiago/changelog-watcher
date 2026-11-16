@@ -4,6 +4,7 @@ Relies on kube-state-metrics' ``kube_pod_container_info`` series, which carries
 the ``image`` label of every container. Three detection modes:
 
 * ``workload`` – namespace + Deployment/StatefulSet/DaemonSet name (+ container)
+* ``helm``     – namespace + Helm release name: every workload of the release
 * ``image``    – any pod running an image whose repository matches a pattern
 * ``query``    – custom PromQL; every returned series must carry an ``image`` label
   (or a ``version`` label). ``{namespace}`` and ``{name}`` are substituted.
@@ -11,6 +12,7 @@ the ``image`` label of every container. Three detection modes:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -18,7 +20,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import expand_env
-from .versioning import image_tag, parse_version
+from .versioning import image_repository, image_tag, parse_version
 
 
 class PrometheusError(RuntimeError):
@@ -51,6 +53,14 @@ def _selector(extra: str | None) -> str:
     return f", {extra}" if extra else ""
 
 
+def _image_regex(pattern: str) -> str:
+    """A plain repository ("ghcr.io/org/app") becomes an anchored regex."""
+    pattern = pattern.strip()
+    if not any(c in pattern for c in "*+?()[]|^$\\"):
+        pattern = rf"(.*/)?{re.escape(pattern)}(:.*|@.*)?"
+    return pattern
+
+
 def build_query(project, deployment, environment) -> str:
     extra = _selector(environment.prometheus_extra_selector)
     namespace = (deployment.namespace_override if deployment else None) or project.workload_namespace
@@ -64,14 +74,24 @@ def build_query(project, deployment, environment) -> str:
         if project.container_name:
             matchers.append(f'container="{_q(project.container_name)}"')
         return "kube_pod_container_info{" + ", ".join(matchers) + extra + "}"
+    if mode == "helm":
+        if not namespace or not name:
+            raise PrometheusError("defina namespace e nome do release Helm")
+        ns = f'namespace="{_q(namespace)}"'
+        filt = f', container="{_q(project.container_name)}"' if project.container_name else ""
+        if project.image_pattern:  # pick one image when the release runs several (app + redis + ...)
+            filt += f', image=~"{_q(_image_regex(project.image_pattern))}"'
+        by_label = (f"kube_pod_container_info{{{ns}{filt}{extra}}} * on(namespace, pod) group_left() "
+                    f'kube_pod_labels{{{ns}, label_app_kubernetes_io_instance="{_q(name)}"{extra}}}')
+        by_prefix = f'kube_pod_container_info{{{ns}, pod=~"{_q(re.escape(name))}-.+"{filt}{extra}}}'
+        # Pods labelled app.kubernetes.io/instance=<release> when kube-state-metrics
+        # exports that label (--metric-labels-allowlist); otherwise "<release>-*" pods.
+        # "unless on() X" drops the fallback entirely whenever X returned anything.
+        return f"({by_label}) or ({by_prefix} unless on() {by_label})"
     if mode == "image":
         if not project.image_pattern:
             raise PrometheusError("defina o padrão de imagem")
-        pattern = project.image_pattern.strip()
-        # A plain repository ("ghcr.io/org/app") is turned into an anchored regex.
-        if not any(c in pattern for c in "*+?()[]|^$\\"):
-            pattern = rf"(.*/)?{re.escape(pattern)}(:.*|@.*)?"
-        matchers = [f'image=~"{_q(pattern)}"']
+        matchers = [f'image=~"{_q(_image_regex(project.image_pattern))}"']
         if namespace:
             matchers.append(f'namespace="{_q(namespace)}"')
         if project.container_name:
@@ -155,9 +175,102 @@ async def detect(project, deployment, environment) -> Detection:
 
 
 async def test_connection(environment) -> dict:
-    result = await instant_query(environment, "count(kube_pod_container_info" + (
-        "{" + environment.prometheus_extra_selector.strip().strip("{},") + "}"
-        if environment.prometheus_extra_selector else ""
-    ) + ")")
+    extra = _selector(environment.prometheus_extra_selector).removeprefix(", ")
+    result = await instant_query(environment, "count(kube_pod_container_info{" + extra + "})")
     containers = int(float(result[0]["value"][1])) if result else 0
     return {"ok": True, "containers": containers}
+
+
+# ----------------------------------------------------------------- discovery
+_HELM_SECRET = re.compile(r"sh\.helm\.release\.v1\.(.+)\.v(\d+)$")
+_HELM_SECRET_MATCHER = 'secret=~"' + _q(r"sh\.helm\.release\.v1\..+") + '"'
+
+
+def _owner_workload(kind: str, name: str) -> tuple[str, str]:
+    """ReplicaSet "app-5d9c7b" -> deployment "app"; Job "backup-28411200" -> cronjob "backup"."""
+    if kind == "ReplicaSet":
+        return "deployment", name.rsplit("-", 1)[0]
+    if kind == "Job" and re.search(r"-\d{8,}$", name):
+        return "cronjob", name.rsplit("-", 1)[0]
+    return kind.lower(), name
+
+
+def _release_for(workload: str, releases: list[str]) -> str | None:
+    """Helm charts prefix their objects with the release name (argocd -> argocd-server)."""
+    hits = [r for r in releases if workload == r or workload.startswith(r + "-")]
+    return max(hits, key=len) if hits else None
+
+
+def _suggest(group: dict) -> dict:
+    """Project fields to start monitoring a discovered group (the UI prefills its form)."""
+    repo = image_repository(group["image"]) or ""
+    if group["release"]:
+        out = {"name": group["release"], "detection_mode": "helm", "workload_name": group["release"]}
+    else:
+        w = group["workloads"][0]
+        if w["kind"] in _POD_SUFFIX:
+            out = {"name": w["name"], "detection_mode": "workload", "workload_kind": w["kind"], "workload_name": w["name"]}
+        else:
+            out = {"name": w["name"], "detection_mode": "image", "image_pattern": repo}
+    # Only ghcr.io maps reliably to a GitHub repo; otherwise the user points to the
+    # repository or release page (no Docker Hub guess).
+    gh = repo.removeprefix("ghcr.io/") if repo.startswith("ghcr.io/") and repo.count("/") == 2 else ""
+    return {**out, "workload_namespace": group["namespace"], "source_type": "github_releases", "repository": gh}
+
+
+async def discover(environment, namespace: str | None = None) -> list[dict]:
+    """Workloads running in a namespace (or the whole cluster), grouped by Helm release.
+
+    Releases come from Helm's storage Secrets (``kube_secret_info``, exported by
+    default); a pod belongs to a release by its ``app.kubernetes.io/instance``
+    label when kube-state-metrics exports it, else by the release-name prefix.
+    """
+    extra = _selector(environment.prometheus_extra_selector).removeprefix(", ")
+    base = ", ".join(p for p in (f'namespace="{_q(namespace)}"' if namespace else "", extra) if p)
+    helm = ", ".join(p for p in (base, _HELM_SECRET_MATCHER) if p)
+    containers, owners, labels, secrets = await asyncio.gather(
+        instant_query(environment, f"kube_pod_container_info{{{base}}}"),
+        instant_query(environment, f"kube_pod_owner{{{base}}}"),
+        instant_query(environment, f"kube_pod_labels{{{base}}}"),
+        instant_query(environment, f"kube_secret_info{{{helm}}}"),
+    )
+    owner = {}
+    for s in owners:
+        m = s["metric"]
+        if m.get("owner_kind") and m.get("owner_name", "<none>") != "<none>":
+            owner[(m.get("namespace"), m.get("pod"))] = _owner_workload(m["owner_kind"], m["owner_name"])
+    pod_labels = {(s["metric"].get("namespace"), s["metric"].get("pod")): s["metric"] for s in labels}
+    releases: dict[tuple, int] = {}  # (namespace, release) -> latest revision
+    for s in secrets:
+        m = s["metric"]
+        if r := _HELM_SECRET.match(m.get("secret", "")):
+            key = (m.get("namespace"), r.group(1))
+            releases[key] = max(releases.get(key, 0), int(r.group(2)))
+
+    groups: dict[tuple, dict] = {}
+    for s in containers:
+        m = s["metric"]
+        ns, pod = m.get("namespace"), m.get("pod")
+        kind, name = owner.get((ns, pod), ("pod", pod))
+        lab = pod_labels.get((ns, pod), {})
+        release = lab.get("label_app_kubernetes_io_instance") or _release_for(
+            name, [r for n, r in releases if n == ns])
+        g = groups.setdefault((ns, release or f"{kind}/{name}"), {
+            "namespace": ns, "release": release, "helm": (ns, release) in releases,
+            "revision": releases.get((ns, release)), "chart": None, "workloads": {}, "series": [],
+        })
+        g["chart"] = g["chart"] or lab.get("label_helm_sh_chart")
+        w = g["workloads"].setdefault(f"{kind}/{name}", {"kind": kind, "name": name, "containers": {}})
+        w["containers"][m.get("container")] = m.get("image")
+        g["series"].append(s)
+
+    out = []
+    for g in groups.values():
+        det = pick_version(g.pop("series"))
+        g.update(image=det.image, version=det.version, images=det.images)
+        g["workloads"] = [{**w, "containers": [{"container": c, "image": i} for c, i in w["containers"].items()]}
+                          for w in sorted(g["workloads"].values(), key=lambda w: w["name"])]
+        g["suggestion"] = _suggest(g)
+        out.append(g)
+    out.sort(key=lambda g: (g["namespace"] or "", g["release"] is None, g["release"] or g["workloads"][0]["name"]))
+    return out

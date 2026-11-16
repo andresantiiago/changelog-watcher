@@ -3,8 +3,8 @@
 
     python deploy/grafana/build_dashboard.py
 
-Writes ``deploy/grafana/changelog-watcher-dashboard.json`` and the copy used by
-the Helm chart (``deploy/helm/changelog-watcher/dashboards/changelog-watcher.json``).
+Writes ``deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`` (also
+importable directly in Grafana).
 """
 
 from __future__ import annotations
@@ -13,10 +13,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-OUTPUTS = [
-    ROOT / "deploy/grafana/changelog-watcher-dashboard.json",
-    ROOT / "deploy/helm/changelog-watcher/dashboards/changelog-watcher.json",
-]
+OUT = ROOT / "deploy/helm/changelog-watcher/dashboards/changelog-watcher.json"
 
 DS = {"type": "prometheus", "uid": "${datasource}"}
 ENV = 'environment=~"$environment"'
@@ -394,10 +391,8 @@ def build() -> dict:
 
 def main() -> None:
     text = json.dumps(build(), indent=2, ensure_ascii=False) + "\n"
-    for out in OUTPUTS:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
-        print(f"wrote {out.relative_to(ROOT)}")
+    OUT.write_text(text, encoding="utf-8")
+    print(f"wrote {OUT.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

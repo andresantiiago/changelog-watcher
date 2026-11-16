@@ -17,13 +17,6 @@ from .analysis import (
 from .config import get_settings
 from .models import Report
 
-STATUS_LABEL = {
-    "up_to_date": "Atualizado",
-    "patch": "Bugfix disponível",
-    "minor": "Minor disponível",
-    "major": "Major disponível",
-    "unknown": "Desconhecido",
-}
 STATUS_ICON = {"up_to_date": "✅", "patch": "🟡", "minor": "🟠", "major": "🔴", "unknown": "⚪", "older": "▫️"}
 
 

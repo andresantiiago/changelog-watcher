@@ -178,12 +178,10 @@ def deployment_status(
     return st
 
 
-def load_projects(session: Session, only_enabled: bool = True) -> list[Project]:
-    stmt = select(Project).options(
+def load_projects(session: Session) -> list[Project]:
+    stmt = select(Project).where(Project.enabled.is_(True)).options(
         selectinload(Project.releases), selectinload(Project.deployments).selectinload(Deployment.environment)
     )
-    if only_enabled:
-        stmt = stmt.where(Project.enabled.is_(True))
     return list(session.scalars(stmt.order_by(Project.name)))
 
 

@@ -100,3 +100,16 @@ def test_tags_enriched_from_changelog():
     rels = asyncio.run(_run(p))
     assert rels[0].published_at.date().isoformat() == "2024-05-02"
     assert "feature X" in rels[0].notes
+
+
+@respx.mock
+def test_webpage_versions():
+    import asyncio
+
+    respx.get("https://app.example.com/releases").mock(return_value=httpx.Response(200, text="""
+<html><body><h2>Release v2.4.1</h2><p>Requer Python 3.12.</p><h2>Release v2.4.0</h2>
+<a href="/dl/app-v2.4.0.tar.gz">download</a><h2>Release v2.4.1</h2></body></html>"""))
+    p = _project(source_type="webpage", repository="https://app.example.com/releases", tag_pattern=r"Release (v\S+)")
+    rels = asyncio.run(_run(p))
+    assert [r.tag for r in rels] == ["Release v2.4.1", "Release v2.4.0"]
+    assert rels[0].url == "https://app.example.com/releases"

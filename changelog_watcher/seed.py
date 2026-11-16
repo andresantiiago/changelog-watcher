@@ -15,17 +15,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Deployment, Environment, Project, Webhook
+from .schemas import DeploymentIn, EnvironmentIn, ProjectIn, WebhookIn
 
 log = logging.getLogger(__name__)
 
-ENV_FIELDS = {"description", "sort_order", "prometheus_url", "prometheus_auth", "prometheus_token",
-              "prometheus_username", "prometheus_password", "prometheus_verify_tls", "prometheus_extra_selector"}
-PROJECT_FIELDS = {"description", "enabled", "tags", "source_type", "repository", "source_url", "chart_name",
-                  "use_app_version", "tag_pattern", "version_scheme", "include_prerelease", "changelog_url", "detection_mode",
-                  "workload_kind", "workload_namespace", "workload_name", "container_name", "image_pattern",
-                  "promql_query", "image_version_pattern"}
-DEPLOYMENT_FIELDS = {"version_source", "manual_version", "namespace_override", "workload_name_override"}
-WEBHOOK_FIELDS = {"kind", "url", "enabled", "only_outdated"}
+ENV_FIELDS = set(EnvironmentIn.model_fields) - {"name"}
+PROJECT_FIELDS = set(ProjectIn.model_fields) - {"name", "deployments"}
+DEPLOYMENT_FIELDS = set(DeploymentIn.model_fields)
+WEBHOOK_FIELDS = set(WebhookIn.model_fields) - {"name", "environment_ids"}
 
 
 def _apply(obj, data: dict, fields: set[str]) -> None:

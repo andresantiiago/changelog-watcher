@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from ..versioning import parse_version
 from . import changelog, dockerhub, github, gitlab, helm
 from .base import ReleaseData, SourceError
 
@@ -15,6 +16,7 @@ SOURCE_TYPES = {
     "helm_index": "Repositório Helm (index.yaml)",
     "dockerhub": "Docker Hub (tags)",
     "changelog": "Arquivo CHANGELOG.md",
+    "webpage": "Página web com as versões",
 }
 
 
@@ -37,6 +39,8 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings, known_dat
         releases = await dockerhub.fetch_tags(project, client, settings, hints)
     elif st == "changelog":
         return await changelog.fetch_changelog(project, client, settings)
+    elif st == "webpage":
+        releases = await changelog.fetch_page(project, client, settings)
     else:
         raise SourceError(f"tipo de fonte desconhecido: {st}")
 
@@ -46,8 +50,6 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings, known_dat
             parsed = await changelog.fetch_changelog(project, client, settings)
         except (SourceError, httpx.HTTPError):
             parsed = []
-        from ..versioning import parse_version
-
         by_version = {}
         for p in parsed:
             v = parse_version(p.tag, two_part=project.version_scheme == "major_patch")

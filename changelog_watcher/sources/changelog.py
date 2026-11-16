@@ -10,6 +10,7 @@ Recognised headings (any level, ``#`` to ``####``)::
 
 from __future__ import annotations
 
+import html
 import re
 
 import httpx
@@ -20,6 +21,7 @@ from .base import ReleaseData, SourceError, parse_datetime
 _HEADING = re.compile(r"^(#{1,4})\s+(?P<title>.+?)\s*#*\s*$")
 _DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _UNRELEASED = re.compile(r"unreleased", re.IGNORECASE)
+_TAG_TOKEN = re.compile(r"(?<![\w.])v?\d+\.\d+(?:\.\d+){0,2}(?:-(?:alpha|beta|rc)[.\w]*)?(?![\w.])", re.IGNORECASE)
 
 
 def parse_changelog(text: str, tag_pattern: str | None = None) -> list[ReleaseData]:
@@ -85,4 +87,27 @@ async def fetch_changelog(project, client: httpx.AsyncClient, settings) -> list[
         raise SourceError("nenhuma versão encontrada no changelog")
     for r in releases:
         r.url = url
+    return releases
+
+
+async def fetch_page(project, client: httpx.AsyncClient, settings) -> list[ReleaseData]:
+    """Any web page listing the versions (release notes site, download page...).
+
+    Every version-like token of the page text is a release; ``tag_pattern``
+    narrows it when the page mentions other software versions too.
+    """
+    from .github import fetch_file
+
+    url = project.repository
+    if not url.startswith("http"):
+        raise SourceError("informe a URL da página de releases")
+    text = html.unescape(re.sub(r"<[^>]+>", " ", await fetch_file(url, client, settings)))
+    if project.tag_pattern:
+        tags = [m.group(0) for m in re.finditer(project.tag_pattern, text)]
+    else:
+        tags = _TAG_TOKEN.findall(text)
+    # ponytail: no publication dates (age metrics stay empty); add a date regex if pages need it.
+    releases = [ReleaseData(tag=t, url=url) for t in dict.fromkeys(tags)]
+    if not releases:
+        raise SourceError("nenhuma versão encontrada na página")
     return releases

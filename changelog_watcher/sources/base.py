@@ -2,13 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Awaitable, Callable
 
 import httpx
-
-if TYPE_CHECKING:  # pragma: no cover
-    from ..config import Settings
-    from ..models import Project
 
 
 class SourceError(RuntimeError):
@@ -26,30 +21,13 @@ class ReleaseData:
     commit_sha: str | None = None
 
 
-Fetcher = Callable[["Project", httpx.AsyncClient, "Settings"], Awaitable[list[ReleaseData]]]
-
-
 def parse_datetime(value) -> datetime | None:
     if not value:
         return None
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     text = str(value).strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    # Helm index uses nanoseconds: 2024-01-02T10:11:12.123456789Z
-    if "." in text:
-        head, _, tail = text.partition(".")
-        frac = ""
-        rest = ""
-        for i, ch in enumerate(tail):
-            if not ch.isdigit():
-                frac, rest = tail[:i], tail[i:]
-                break
-        else:
-            frac = tail
-        text = f"{head}.{frac[:6]}{rest}" if frac else f"{head}{rest}"
-    try:
+    try:  # 3.11+ handles "Z" and Helm's nanoseconds (2024-01-02T10:11:12.123456789Z)
         dt = datetime.fromisoformat(text)
     except ValueError:
         try:

@@ -4,9 +4,13 @@ Acompanha os changelogs/releases de uma lista de aplicações, compara com a ver
 que está rodando em cada ambiente e avisa o que precisa ser atualizado.
 
 - **Fontes de releases**: GitHub Releases/Tags, GitLab Releases/Tags, repositórios
-  Helm (`index.yaml`), Docker Hub e arquivos `CHANGELOG.md`.
+  Helm (`index.yaml`), Docker Hub, arquivos `CHANGELOG.md` ou qualquer **página web**
+  que liste as versões.
 - **Versão em uso** informada manualmente ou **descoberta pelo Prometheus**
-  (imagem do Deployment/StatefulSet/DaemonSet via kube-state-metrics).
+  (imagem do Deployment/StatefulSet/DaemonSet via kube-state-metrics), inclusive
+  agrupando **todos os workloads de um release Helm** como uma única aplicação.
+- **Descoberta no cluster**: lista o que roda num namespace agrupado por release
+  Helm e cria a aplicação com um clique, apontando para o repositório ou site de releases.
 - **Vários ambientes** (dev, homologação, produção…), cada um com seu Prometheus,
   e **comparação de versões entre ambientes**.
 - Para cada aplicação/ambiente: **bugfix** mais recente da linha em uso
@@ -51,6 +55,7 @@ que expõe `kube_pod_container_info{namespace, pod, container, image}`.
 | Modo | Configuração | Consulta gerada |
 |---|---|---|
 | `workload` | tipo, namespace, nome, container (opcional) | `kube_pod_container_info{namespace="argocd", pod=~"argocd-server-[a-z0-9]{1,10}-[a-z0-9]{5}", container="server"}` |
+| `helm` | namespace e nome do release; imagem (opcional) escolhe qual imagem define a versão | pods com `app.kubernetes.io/instance=<release>` (`kube_pod_labels`); sem esse label, pods `<release>-*` |
 | `image` | repositório da imagem (ou regex) e namespace opcional | `kube_pod_container_info{image=~"(.*/)?quay\.io/jetstack/cert-manager-controller(:.*\|@.*)?"}` |
 | `query` | PromQL livre; as séries precisam do label `image` (ou `version`) | `{namespace}` e `{name}` são substituídos |
 
@@ -61,6 +66,30 @@ namespace e nome do workload, e o **seletor extra** do ambiente (ex.
 
 O botão **Testar detecção**, na página da aplicação, mostra a consulta e o
 resultado sem salvar nada.
+
+### Releases Helm e descoberta no cluster
+
+Charts que criam vários Deployments (Argo CD: server, repo-server, controller,
+redis…) viram **uma aplicação** com o modo `helm`: a versão é a imagem usada pela
+maioria dos pods do release (use **Imagem** para fixar qual delas, ex.
+`quay.io/argoproj/argocd`, quando o release roda imagens de terceiros).
+
+A tela **Descobrir no cluster** consulta um namespace (ou o cluster todo) e mostra
+os workloads agrupados por release:
+
+- os releases vêm dos Secrets de armazenamento do Helm (`sh.helm.release.v1.<release>.v<rev>`,
+  métrica `kube_secret_info`, exportada por padrão);
+- cada pod entra no release pelo label `app.kubernetes.io/instance` ou, sem ele,
+  pelo prefixo do nome. Para usar o label (e ver o `helm.sh/chart`), habilite no
+  kube-state-metrics:
+  `--metric-labels-allowlist=pods=[app.kubernetes.io/instance,helm.sh/chart]`.
+
+**Monitorar** abre o formulário já preenchido; informe de onde vêm as releases:
+repositório GitHub/GitLab, CHANGELOG, repositório Helm ou a URL de uma **página
+web** (fonte `webpage`: toda versão encontrada no texto vira uma release; use o
+**padrão de tag** para ignorar versões de outros softwares citadas na página e a
+**URL do CHANGELOG** para trazer notas e datas). Imagens do `ghcr.io` já sugerem o
+repositório GitHub.
 
 ## Executando
 
@@ -235,7 +264,7 @@ Todas com prefixo `changelog_watcher_`, calculadas a partir do banco a cada scra
 ### Grafana
 
 O dashboard está em
-[`deploy/grafana/changelog-watcher-dashboard.json`](deploy/grafana/changelog-watcher-dashboard.json)
+[`deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`](deploy/helm/changelog-watcher/dashboards/changelog-watcher.json)
 (importe pela UI ou use `grafana.dashboard.enabled` no Helm). Ele tem filtros de
 ambiente e aplicação e mostra: % atualizado, pendências de bugfix/minor/major,
 libyears, status por ambiente, faixas de atraso, evolução no tempo, tabela de
@@ -244,7 +273,7 @@ divergências entre pares de ambientes, histórico de status por aplicação, no
 versões e falhas de coleta.
 
 O JSON é gerado por [`deploy/grafana/build_dashboard.py`](deploy/grafana/build_dashboard.py);
-edite o script e rode-o para atualizar as duas cópias (a do chart inclusive).
+edite o script e rode-o para atualizar o JSON.
 
 O `PrometheusRule` opcional traz alertas para versão major pendente há mais de N
 dias, falha de detecção e coleta parada.
@@ -253,7 +282,7 @@ dias, falha de detecção e coleta parada.
 
 ```
 changelog_watcher/
-  sources/      fontes de releases (github, gitlab, helm, dockerhub, changelog)
+  sources/      fontes de releases (github, gitlab, helm, dockerhub, changelog, página web)
   prometheus.py detecção da versão em uso via kube_pod_container_info
   versioning.py parsing de versões e classificação bugfix/minor/major
   analysis.py   status por implantação, resumos, comparação entre ambientes
