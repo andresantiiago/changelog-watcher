@@ -1,0 +1,46 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Changelog Watcher tracks releases of a list of apps, compares them with the version running in each environment (manual or detected via Prometheus/kube-state-metrics) and reports what is outdated (UI, weekly webhook report, `/metrics`, Grafana dashboard, Helm chart). The README (in Portuguese) is the user-facing spec: version classification rules, Prometheus detection modes, env vars, metrics table. User-facing strings, error messages and docs are in Portuguese (pt-BR); keep it that way.
+
+## Commands
+
+```bash
+pip install -e ".[dev]"                                  # Python >= 3.11
+CONFIG_FILE=config.example.yaml changelog-watcher serve  # http://localhost:8080, API docs at /docs
+changelog-watcher refresh                                # one-off refresh
+changelog-watcher report [--send] [--days N]
+
+pytest -q                                                # all tests
+pytest tests/test_versioning.py::test_name -q            # single test
+python deploy/grafana/build_dashboard.py                 # regenerate Grafana dashboard JSON
+helm lint deploy/helm/changelog-watcher
+```
+
+CI (`.github/workflows/ci.yaml`) runs pytest, regenerates the dashboard and fails on `git diff --exit-code deploy/`, then `helm lint` + `helm template` with all optional features enabled. Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`; edit `build_dashboard.py` and rerun it.
+
+## Architecture
+
+Single FastAPI process (`main.py:create_app`) that serves the REST API (`api.py`, under `/api`), the static SPA (`static/`, plain HTML/JS/CSS, no build step), `/metrics`, and runs an in-process APScheduler (`scheduler.py`: interval refresh + cron weekly report). Because the scheduler is in-process, the app must run with one replica.
+
+Data flow:
+1. **Refresh** (`refresh.py:run_refresh`): first `detect_versions` (Prometheus queries via `prometheus.py`, for deployments with `version_source == "prometheus"`), then fetch releases per project (`sources.fetch_releases`, dispatching on `Project.source_type`), upsert `Release` rows, and finally `store_snapshots` (one `Snapshot` per environment per day, feeding the UI history charts). Detection runs first because deployed versions are passed as `hints` to some sources (Docker Hub). A module-level `asyncio.Lock` + `STATE` serializes runs; API endpoints trigger refreshes via `_spawn`.
+2. **Analysis** (`analysis.py`) is computed on demand from the DB, never stored: `compute_statuses` → `DeploymentStatus` per (project × environment) with latest bugfix/minor/major, status, outdated days, libyears. Dashboard, report, metrics and env comparison all build on this.
+3. **Outputs**: `report.py` (report data + Markdown, saved as `Report`), `webhooks.py` (per-kind payload formatting), `metrics.py` (`WatcherCollector`, a custom collector that computes gauges from the DB on each scrape, cached `METRICS_CACHE_SECONDS`). Process counters/histograms live in `refresh.py`.
+
+Key conventions:
+- **Version parsing** goes through `versioning.parse_version(tag, tag_pattern, two_part=...)`; in `analysis.py` use the `pv(project, text)` wrapper so the project's `tag_pattern` and `version_scheme` (`major_patch` for e.g. PostgreSQL) are respected. `Deployment.current_version` resolves detected vs manual version.
+- **Adding a release source**: new module in `sources/` returning `list[ReleaseData]`, raising `SourceError` for expected failures (use `base.get_json` for HTTP), then register it in `SOURCE_TYPES` and the dispatch in `sources/__init__.py`. `changelog_url` enrichment of missing notes/dates happens generically there.
+- **Secrets**: fields like Prometheus tokens/passwords and webhook URLs may hold `${VAR}` placeholders, expanded only at use time with `config.expand_env`. The API masks them with `mask_secret`, and an incoming `SECRET_MASK` value means "keep the existing value".
+- **DB / migrations**: SQLAlchemy 2.0 models in `models.py`; `db.init_engine` does `create_all` plus `_add_missing_columns`, a forward-only migration that only adds columns. New columns must be nullable or have a scalar default; renames/removals are not supported. SQLite by default, PostgreSQL via `DATABASE_URL`.
+- **Seed** (`seed.py`): optional YAML (`CONFIG_FILE`) loaded at startup and by CLI commands. Accepted fields are derived from the Pydantic `*In` schemas in `schemas.py`, so a new schema field is automatically seedable. Only creates missing records unless `SEED_OVERWRITE=true`.
+- **Settings** come from env vars only (`config.Settings.from_env`, `lru_cache`d `get_settings()`). When adding a setting, also document it in the README table and, if relevant, `deploy/helm/changelog-watcher/values.yaml`.
+
+## Tests
+
+`tests/conftest.py` sets env vars *before* importing the app (in-memory SQLite, scheduler and startup refresh disabled, metrics cache 0). The `client` fixture builds a fresh app + DB; `seeded` creates two environments, three projects and releases through the API. HTTP to external sources is mocked with `respx`.
+
+`tests/test_deploy.py` couples code and deploy artifacts:
+- every `changelog_watcher_*` metric used in the Grafana dashboard must be exposed by `/metrics` (renaming/removing a metric means updating `build_dashboard.py`);
+- `config.example.yaml` must load with exact counts (`{"environments": 2, "projects": 6, "webhooks": 2}`), so update the assertion when changing the example.
