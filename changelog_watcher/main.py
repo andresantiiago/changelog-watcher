@@ -17,6 +17,7 @@ from . import __version__
 from .api import router
 from .config import get_settings
 from .db import get_engine, init_engine, session_scope
+from . import logstore
 from .metrics import WatcherCollector
 from .refresh import run_refresh
 from .scheduler import start_scheduler, stop_scheduler
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     init_engine()
+    logstore.install()
     if settings.config_file:
         with session_scope() as s:
             stats = load_seed(s, settings.config_file, overwrite=settings.seed_overwrite)
@@ -95,7 +97,13 @@ def create_app() -> FastAPI:
     def metrics():
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    class _Revalidate(StaticFiles):  # SPA has no build hash: make browsers revalidate (ETag -> 304) so UI updates apply on reload
+        async def get_response(self, path, scope):
+            resp = await super().get_response(path, scope)
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+    app.mount("/static", _Revalidate(directory=STATIC), name="static")
 
     @app.get("/", include_in_schema=False)
     def index():

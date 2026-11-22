@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .db import session_scope
-from .models import Webhook
+from .models import AppSetting, Webhook
 from .refresh import run_refresh
 from .report import create_report
 from .webhooks import deliver_report
@@ -30,22 +30,47 @@ async def scheduled_report() -> dict:
         return {"report_id": report.id, "delivery": report.delivery}
 
 
+def effective_schedule() -> dict:
+    """Env-var defaults overridden by values saved in the UI (app_settings)."""
+    settings = get_settings()
+    out = {"refresh_interval_minutes": settings.refresh_interval_minutes, "report_cron": settings.report_cron}
+    with session_scope() as s:
+        for row in s.scalars(select(AppSetting)):
+            if row.key in out:
+                out[row.key] = int(row.value) if row.key == "refresh_interval_minutes" else row.value
+    return out
+
+
+def _schedule_jobs() -> None:
+    settings = get_settings()
+    sch = effective_schedule()
+    for job_id in ("refresh", "weekly_report"):
+        if _scheduler.get_job(job_id):
+            _scheduler.remove_job(job_id)
+    if sch["refresh_interval_minutes"] > 0:
+        _scheduler.add_job(run_refresh, IntervalTrigger(minutes=sch["refresh_interval_minutes"]),
+                           id="refresh", max_instances=1, coalesce=True)
+    if sch["report_cron"]:
+        _scheduler.add_job(scheduled_report, CronTrigger.from_crontab(sch["report_cron"], timezone=settings.timezone),
+                           id="weekly_report", max_instances=1, coalesce=True, misfire_grace_time=3600)
+    log.info("scheduler configured (refresh every %s min, report '%s' %s)",
+             sch["refresh_interval_minutes"], sch["report_cron"], settings.timezone)
+
+
 def start_scheduler() -> AsyncIOScheduler | None:
     global _scheduler
     settings = get_settings()
     if not settings.scheduler_enabled:
         return None
     _scheduler = AsyncIOScheduler(timezone=settings.timezone)
-    if settings.refresh_interval_minutes > 0:
-        _scheduler.add_job(run_refresh, IntervalTrigger(minutes=settings.refresh_interval_minutes),
-                           id="refresh", max_instances=1, coalesce=True)
-    if settings.report_cron:
-        _scheduler.add_job(scheduled_report, CronTrigger.from_crontab(settings.report_cron, timezone=settings.timezone),
-                           id="weekly_report", max_instances=1, coalesce=True, misfire_grace_time=3600)
+    _schedule_jobs()
     _scheduler.start()
-    log.info("scheduler started (refresh every %s min, report '%s' %s)",
-             settings.refresh_interval_minutes, settings.report_cron, settings.timezone)
     return _scheduler
+
+
+def reschedule() -> None:
+    if _scheduler:
+        _schedule_jobs()
 
 
 def stop_scheduler() -> None:

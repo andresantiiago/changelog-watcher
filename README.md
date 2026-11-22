@@ -202,9 +202,9 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 | `SEED_OVERWRITE` | `false` | seed sobrescreve alterações feitas pela UI |
 | `GITHUB_TOKEN` / `GITHUB_API_URL` | — / `https://api.github.com` | token e API (GitHub Enterprise) |
 | `GITLAB_TOKEN` / `GITLAB_URL` | — / `https://gitlab.com` | token e URL do GitLab |
-| `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa) |
+| `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa) (padrão; pode ser alterado na página Configuração) |
 | `REFRESH_ON_STARTUP` | `true` | busca ao iniciar |
-| `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal |
+| `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal (padrão; pode ser alterado na página Configuração) |
 | `REPORT_DAYS` | `7` | janela de "novas versões" do relatório |
 | `REPORT_SEND_ENABLED` | `true` | envia o relatório agendado aos webhooks |
 | `TZ` | `UTC` | fuso do agendador |

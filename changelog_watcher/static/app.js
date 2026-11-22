@@ -1,7 +1,7 @@
 /* Changelog Watcher – single page app (no build step). */
 "use strict";
 
-const S = { meta: null, envs: [], projects: [], refresh: null, charts: [], envFilter: null };
+const S = { meta: null, envs: [], projects: [], refresh: null, charts: [], envFilter: null, nsFilter: "" };
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -81,10 +81,14 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function toast(msg, error = false) {
+function showError(text, title = "Detalhes do erro") {
+  modal(title, `<pre class="log">${esc(text)}</pre><p class="small muted" style="margin-bottom:0">Histórico completo em <a href="#/logs" data-close>Logs</a>.</p>`);
+}
+function toast(msg, error = false, onClick = null) {
   const el = document.createElement("div");
-  el.className = "toast" + (error ? " error" : "");
+  el.className = "toast" + (error ? " error click" : "");
   el.textContent = msg;
+  if (error) { el.title = "Clique para ver detalhes"; el.addEventListener("click", () => { el.remove(); onClick ? onClick() : showError(msg); }); }
   $("#toasts").appendChild(el);
   setTimeout(() => el.remove(), error ? 7000 : 3500);
 }
@@ -389,8 +393,6 @@ const inp = (name, value, attrs = "") => `<input name="${name}" value="${esc(val
 async function loadBase() {
   const [meta, envs, projects] = await Promise.all([api("/api/meta"), api("/api/environments"), api("/api/projects")]);
   S.meta = meta; S.envs = envs; S.projects = projects;
-  const sch = meta.schedule;
-  $("#schedule-info").textContent = `Relatório: ${sch.report_cron} (${sch.timezone}) · atualização a cada ${sch.refresh_interval_minutes} min`;
 }
 
 // ------------------------------------------------------------- refreshing
@@ -409,7 +411,7 @@ async function pollRefresh() {
   renderRefreshInfo();
   if (st.running) { setTimeout(pollRefresh, 2000); return; }
   const errs = st.projects_failed + st.detections_failed;
-  toast(`Atualização concluída: ${st.new_releases} novas versões${errs ? `, ${errs} erro(s)` : ""}`, errs > 0);
+  toast(`Atualização concluída: ${st.new_releases} novas versões${errs ? `, ${errs} erro(s)` : ""}`, errs > 0, () => showError(st.errors.join("\n\n"), "Erros da atualização"));
   await loadBase();
   route();
 }
@@ -423,9 +425,14 @@ function renderRefreshInfo() {
     btn.disabled = false; icon.classList.remove("spin"); $("span", btn).textContent = "Buscar atualizações";
   }
   $("#refresh-info").innerHTML = st?.finished_at
-    ? `Última atualização ${rel(st.finished_at)}${st.success === false ? ` · <span class="err">${st.errors.length} erro(s)</span>` : ""}`
+    ? `Última atualização ${rel(st.finished_at)}${st.success === false ? ` · <span class="err" data-err-refresh>${st.errors.length} erro(s)</span>` : ""}`
     : "";
 }
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-err]");
+  if (el) return showError(el.dataset.err);
+  if (e.target.closest("[data-err-refresh]") && S.refresh) showError(S.refresh.errors.join("\n\n") || "Sem detalhes.", "Erros da última atualização");
+});
 
 // ================================================================ VIEWS
 function envFilterBar(onChange, selected) {
@@ -448,7 +455,7 @@ function updatesCell(s) {
 
 // ------------------------------------------------------------- dashboard
 async function viewDashboard(view) {
-  const q = S.envFilter ? `?environment_id=${S.envFilter}` : "";
+  const q = `?${S.envFilter ? `environment_id=${S.envFilter}&` : ""}${S.nsFilter ? `namespace=${encodeURIComponent(S.nsFilter)}` : ""}`;
   const [d, hist] = await Promise.all([api(`/api/dashboard${q}`), api(`/api/history?days=180${S.envFilter ? `&environment_id=${S.envFilter}` : ""}`)]);
   const o = d.overall;
   const filter = envFilterBar((id) => { S.envFilter = id; route(); }, S.envFilter);
@@ -458,7 +465,7 @@ async function viewDashboard(view) {
   }
   const ratio = o.up_to_date_ratio;
   view.innerHTML = `
-    <div class="filters">${filter.html}</div>
+    <div class="filters">${filter.html}${d.namespaces.length ? `<select id="ns-filter" aria-label="Namespace"><option value="">Todos os namespaces</option>${d.namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}</div>
     <div class="grid kpis">
       ${kpi("Ambiente atualizado", pct(ratio), `${o.counts.up_to_date} de ${o.known} com versão conhecida`, `<div class="meter"><i style="width:${(ratio || 0) * 100}%"></i></div>`, "hero")}
       ${kpi("Implantações monitoradas", num(o.total), `${d.projects} aplicações · ${o.counts.unknown} sem versão identificada`)}
@@ -490,6 +497,7 @@ async function viewDashboard(view) {
       </table></div>
     </div>`;
   filter.bind(view);
+  $("#ns-filter", view)?.addEventListener("change", (e) => { S.nsFilter = e.target.value; route(); });
   bindRowLinks(view);
 
   stackedBars($("#ch-status", view), d.environments.map((e) => ({ label: e.environment, values: e.counts })), STATUS_KEYS, statusColor, (k) => STATUS[k].label);
@@ -506,7 +514,7 @@ async function viewDashboard(view) {
 
 function bindRowLinks(root) {
   $$("tr[data-href]", root).forEach((tr) => tr.addEventListener("click", (e) => {
-    if (e.target.closest("a,button,input,select")) return;
+    if (e.target.closest("a,button,input,select,.err")) return;
     location.hash = tr.dataset.href;
   }));
 }
@@ -517,12 +525,15 @@ async function viewApps(view) {
   const byKey = {};
   statuses.forEach((s) => { byKey[`${s.project_id}:${s.environment_id}`] = s; });
   const allTags = [...new Set(S.projects.flatMap((p) => p.tags || []))].sort();
+  const namespaces = [...new Set(statuses.map((s) => s.namespace).filter(Boolean))].sort();
+  if (!namespaces.includes(S.nsFilter)) S.nsFilter = "";
   const st = viewApps.state ||= { q: "", status: "", tag: "" };
   view.innerHTML = `
     <div class="filters">
       <input type="search" id="f-q" placeholder="Buscar aplicação…" value="${esc(st.q)}">
       <select id="f-status"><option value="">Todos os status</option>${STATUS_KEYS.map((k) => opt(k, STATUS[k].label, st.status)).join("")}<option value="outdated" ${st.status === "outdated" ? "selected" : ""}>Qualquer atualização</option></select>
       ${allTags.length ? `<select id="f-tag"><option value="">Todas as tags</option>${allTags.map((t) => opt(t, t, st.tag)).join("")}</select>` : ""}
+      ${namespaces.length ? `<select id="f-ns" aria-label="Namespace"><option value="">Todos os namespaces</option>${namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}
       <div class="spacer" style="flex:1"></div>
       <button class="btn primary" id="new-app" type="button">+ Nova aplicação</button>
     </div>
@@ -535,6 +546,7 @@ async function viewApps(view) {
     const rows = S.projects.filter((p) => {
       if (st.q && !`${p.name} ${p.repository} ${(p.tags || []).join(" ")}`.toLowerCase().includes(st.q.toLowerCase())) return false;
       if (st.tag && !(p.tags || []).includes(st.tag)) return false;
+      if (S.nsFilter && !statuses.some((s) => s.project_id === p.id && s.namespace === S.nsFilter)) return false;
       if (st.status) {
         const ss = S.envs.map((e) => byKey[`${p.id}:${e.id}`]).filter(Boolean);
         if (st.status === "outdated") return ss.some((s) => ["patch", "minor", "major"].includes(s.status));
@@ -547,13 +559,13 @@ async function viewApps(view) {
       return `<tr class="clickable" data-href="#/apps/${p.id}">
         <td><div><b>${esc(p.name)}</b> ${p.enabled ? "" : '<span class="chip">desativada</span>'}</div>
           <div class="small muted">${esc(S.meta.source_types[p.source_type] || p.source_type)} · ${esc(p.repository)}</div>
-          ${p.last_error ? `<div class="err" title="${esc(p.last_error)}">⚠ ${esc(p.last_error.slice(0, 80))}</div>` : ""}
+          ${p.last_error ? `<div class="err" data-err="${esc(p.last_error)}" title="Clique para ver o erro">⚠ ${esc(p.last_error.slice(0, 80))}</div>` : ""}
           ${(p.tags || []).length ? `<div class="pill-row" style="margin-top:4px">${p.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}</td>
         ${S.envs.map((e) => {
           const s = byKey[`${p.id}:${e.id}`];
           if (!s) return `<td class="muted small">não implantado</td>`;
           return `<td><div class="cell-ver">${ver(s.current_version)} ${badge(s.status)} ${updatesCell(s)}
-            ${s.detection_error ? `<span class="err" title="${esc(s.detection_error)}">⚠ detecção falhou</span>` : ""}</div></td>`;
+            ${s.detection_error ? `<span class="err" data-err="${esc(s.detection_error)}" title="Clique para ver o erro">⚠ detecção falhou</span>` : ""}</div></td>`;
         }).join("")}
         <td>${ver(any?.latest_version)}<div class="small muted">${any?.latest_version_date ? fmtDate(any.latest_version_date) : ""}</div></td>
         <td class="nowrap right"><button class="btn sm" data-refresh="${p.id}" type="button" title="Buscar releases">↻</button> <button class="btn sm" data-edit="${p.id}" type="button">Editar</button></td>
@@ -566,6 +578,7 @@ async function viewApps(view) {
   draw();
   $("#f-q", view).addEventListener("input", debounce((e) => { st.q = e.target.value; draw(); }, 150));
   $("#f-status", view).addEventListener("change", (e) => { st.status = e.target.value; draw(); });
+  $("#f-ns", view)?.addEventListener("change", (e) => { S.nsFilter = e.target.value; draw(); });
   $("#f-tag", view)?.addEventListener("change", (e) => { st.tag = e.target.value; draw(); });
   $("#new-app", view).addEventListener("click", () => projectForm());
 }
@@ -669,7 +682,7 @@ async function viewAppDetail(view, id) {
         <div class="row"><h2 style="margin:0">${esc(p.name)}</h2>${(p.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>
         <div class="small muted" style="margin-top:4px">${esc(S.meta.source_types[p.source_type] || p.source_type)} · ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(p.repository)}</a>` : esc(p.repository)} · ${p.release_count} versões conhecidas · verificado ${rel(p.last_checked_at)}</div>
         ${p.description ? `<p style="margin:8px 0 0">${esc(p.description)}</p>` : ""}
-        ${p.last_error ? `<div class="err" style="margin-top:6px">⚠ ${esc(p.last_error)}</div>` : ""}
+        ${p.last_error ? `<div class="err" data-err="${esc(p.last_error)}" style="margin-top:6px">⚠ ${esc(p.last_error)}</div>` : ""}
       </div>
       <div class="row"><button class="btn" id="d-refresh" type="button">↻ Buscar releases</button><button class="btn" id="d-edit" type="button">Editar</button><button class="btn danger" id="d-del" type="button">Excluir</button></div></div>
     </div>
@@ -678,7 +691,7 @@ async function viewAppDetail(view, id) {
         <div class="card-head"><h2>${esc(s.environment)}</h2>${badge(s.status, STATUS[s.status].label)}</div>
         <div class="row" style="align-items:baseline"><span class="small muted">Em uso</span><span class="ver" style="font-size:20px;font-weight:600">${esc(s.current_version || "—")}</span><span class="small muted">${s.current_release_date ? `publicada em ${fmtDate(s.current_release_date)}` : ""}</span></div>
         <div class="small muted" style="margin:6px 0 10px">Origem: ${s.version_source === "prometheus" ? `Prometheus${s.detected_at ? ` (${rel(s.detected_at)})` : ""}` : "manual"}${s.detected_image ? `<br><span class="mono">${esc(s.detected_image)}</span>` : ""}</div>
-        ${s.detection_error ? `<div class="err" style="margin-bottom:8px">⚠ ${esc(s.detection_error)}</div>` : ""}
+        ${s.detection_error ? `<div class="err" data-err="${esc(s.detection_error)}" style="margin-bottom:8px">⚠ ${esc(s.detection_error)}</div>` : ""}
         <table><tbody>
           <tr><td class="muted">Bugfix</td><td>${s.latest_patch ? `${s.latest_patch_url ? `<a href="${esc(s.latest_patch_url)}" target="_blank" rel="noopener">${esc(s.latest_patch)}</a>` : esc(s.latest_patch)} <span class="small muted">(${s.patch_behind} atrás)</span>` : "—"}</td></tr>
           <tr><td class="muted">Minor</td><td>${s.latest_minor ? `${s.latest_minor_url ? `<a href="${esc(s.latest_minor_url)}" target="_blank" rel="noopener">${esc(s.latest_minor)}</a>` : esc(s.latest_minor)} <span class="small muted">(${s.minor_behind} atrás)</span>` : "—"}</td></tr>
@@ -787,16 +800,17 @@ async function viewCompare(view) {
 // -------------------------------------------------------------- releases
 async function viewReleases(view) {
   const st = viewReleases.state ||= { days: 7 };
-  const list = await api(`/api/releases/recent?days=${st.days}`);
+  // só o que é novidade para o que está implantado: esconde "Já em uso" e linhas anteriores
+  const list = (await api(`/api/releases/recent?days=${st.days}`)).filter((r) => r.level !== "up_to_date" && r.level !== "older");
   view.innerHTML = `
     <div class="filters"><div class="seg">${[7, 14, 30, 90].map((d) => `<button type="button" data-days="${d}" class="${st.days === d ? "on" : ""}">${d} dias</button>`).join("")}</div>
-      <span class="muted">${list.length} versões publicadas</span></div>
+      <span class="muted">${list.length} versões pendentes de atualização</span></div>
     <div class="card">${list.map((r) => `<div class="release">
       <div class="head"><a href="#/apps/${r.project_id}"><b>${esc(r.project)}</b></a><span class="ver">${esc(r.tag)}</span>${r.level === "older" ? badge("unknown", "Linha anterior") : badge(r.level, r.level === "up_to_date" ? "Já em uso" : r.level === "unknown" ? "Sem versão em uso" : `${STATUS[r.level].short} p/ o ambiente`)}
       <span class="small muted">${fmtDate(r.published_at)}</span>${r.url ? `<a class="small" href="${esc(r.url)}" target="_blank" rel="noopener">abrir ↗</a>` : ""}</div>
       <div class="small muted">${Object.entries(r.deployed).map(([env, v]) => `${esc(env)}: <span class="ver">${esc(v || "?")}</span>`).join(" · ") || "não implantado"}</div>
       ${r.notes ? `<details><summary>Notas da versão</summary><div class="notes">${md(r.notes)}</div></details>` : ""}
-    </div>`).join("") || `<div class="empty">Nenhuma versão nova no período.</div>`}</div>`;
+    </div>`).join("") || `<div class="empty">Nenhuma versão nova pendente no período.</div>`}</div>`;
   $$("[data-days]", view).forEach((b) => b.addEventListener("click", () => { st.days = Number(b.dataset.days); route(); }));
 }
 
@@ -967,6 +981,7 @@ async function viewDiscover(view) {
       ${field("Ambiente", `<select id="dc-env">${envs.map((e) => opt(e.id, e.name, st.env)).join("")}</select>`)}
       ${field("Namespace", `<input id="dc-ns" value="${esc(st.namespace)}" placeholder="vazio = todos">`)}
       <button class="btn primary" type="submit" style="margin-top:18px">Descobrir</button>
+      <button class="btn" type="button" id="dc-all" style="margin-top:18px" hidden>Monitorar todos</button>
       <span class="small muted" style="margin-top:18px">Agrupa os workloads por release Helm (Secrets <code>sh.helm.release.v1.*</code> e label <code>app.kubernetes.io/instance</code>).</span>
     </form>
     <div id="dc-out"></div>`;
@@ -975,6 +990,10 @@ async function viewDiscover(view) {
     const r = st.result;
     if (!r) return;
     if (!r.ok) { out.innerHTML = `<div class="card err">⚠ ${esc(r.error)}</div>`; return; }
+    const pending = r.groups.filter((g) => !g.project);
+    const allBtn = $("#dc-all", view);
+    allBtn.hidden = !pending.length;
+    allBtn.textContent = `Monitorar todos (${pending.length})`;
     out.innerHTML = r.groups.map((g, i) => `<div class="card" style="margin-bottom:12px">
       <div class="card-head"><div>
         <div class="row"><h2 style="margin:0">${esc(g.release || g.workloads[0].name)}</h2>
@@ -989,6 +1008,28 @@ async function viewDiscover(view) {
     </div>`).join("") || `<div class="card empty">Nenhum container encontrado.</div>`;
     $$("[data-track]", out).forEach((b) => b.addEventListener("click", () => projectForm(r.groups[Number(b.dataset.track)].suggestion, true)));
   };
+  $("#dc-all", view).addEventListener("click", async (e) => {
+    const todo = st.result.groups.filter((g) => !g.project);
+    if (!confirm(`Monitorar ${todo.length} aplicação(ões)? Sem repositório conhecido, usa-se a imagem no Docker Hub – ajuste depois em Aplicações.`)) return;
+    e.target.disabled = true;
+    let ok = 0; const fails = [];
+    for (const g of todo) {
+      const sg = g.suggestion;
+      const image = (g.image || "").split("@")[0].replace(/:[^/:]*$/, "");
+      const repository = sg.repository || image;
+      if (!repository) { fails.push(`${sg.name}: sem imagem/repositório`); continue; }
+      try {
+        await api("/api/projects?refresh=false", { method: "POST", body: { ...sg, repository, source_type: sg.repository ? "github_releases" : "dockerhub",
+          deployments: { [st.env]: { version_source: "prometheus" } } } });
+        ok++;
+      } catch (err) { fails.push(`${sg.name}: ${err.message}`); }
+    }
+    e.target.disabled = false;
+    toast(`${ok} aplicação(ões) adicionada(s)${fails.length ? `, ${fails.length} falha(s)` : ""}`, fails.length > 0, () => showError(fails.join("\n"), "Falhas ao adicionar"));
+    await loadBase();
+    if (ok) startRefresh();
+    $("#dc-form", view).requestSubmit();
+  });
   $("#dc-form", view).addEventListener("submit", async (e) => {
     e.preventDefault();
     st.env = Number($("#dc-env", view).value);
@@ -1002,6 +1043,48 @@ async function viewDiscover(view) {
   draw();
 }
 
+// -------------------------------------------------------------- settings
+async function viewSettings(view) {
+  const c = await api("/api/settings");
+  view.innerHTML = `<form class="card" id="st-form" style="max-width:640px">
+    <div class="card-head"><h2>Agendamento</h2></div>
+    <div class="form-grid">
+      ${field("Verificação do relatório (cron)", inp("report_cron", c.report_cron, "required"), `minuto hora dia mês dia-da-semana · fuso <code>${esc(c.timezone)}</code> · ex: <code>0 9 * * mon</code> = segundas às 9h${c.next_runs?.weekly_report ? ` · próximo envio ${fmtDate(c.next_runs.weekly_report, true)}` : ""}`, "full")}
+      ${field("Atualização das versões (minutos)", inp("refresh_interval_minutes", c.refresh_interval_minutes, 'type="number" min="0"'), `0 desativa a atualização automática${c.next_runs?.refresh ? ` · próxima ${fmtDate(c.next_runs.refresh, true)}` : ""}`, "full")}
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Salvar</button></div>
+  </form>`;
+  $("#st-form", view).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/settings", { method: "PUT", body: formData(e.target) });
+      toast("Configuração salva");
+      await loadBase();
+      route();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+// ------------------------------------------------------------------ logs
+async function viewLogs(view) {
+  const st = viewLogs.state ||= { level: "", q: "" };
+  view.innerHTML = `<form class="filters" id="lg-form">
+    <select id="lg-level">${[["", "Todos os níveis"], ["ERROR", "Erro"], ["WARNING", "Aviso"], ["INFO", "Info"]].map(([v, l]) => opt(v, l, st.level)).join("")}</select>
+    <input type="search" id="lg-q" placeholder="Buscar na mensagem" value="${esc(st.q)}">
+    <button class="btn" type="submit">Filtrar</button>
+  </form><div id="lg-out"></div>`;
+  const load = async () => {
+    const rows = await api(`/api/logs?limit=500&level=${st.level}&q=${encodeURIComponent(st.q)}`);
+    $("#lg-out", view).innerHTML = `<div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Quando</th><th>Nível</th><th>Origem</th><th>Mensagem</th></tr></thead><tbody>${rows.map((r) => `<tr>
+        <td class="nowrap small">${fmtDate(r.created_at, true)}</td><td><span class="lvl-${esc(r.level)}">${esc(r.level)}</span></td>
+        <td class="small muted">${esc(r.logger.replace("changelog_watcher.", ""))}</td>
+        <td>${esc(r.message)}${r.detail ? `<details><summary class="small">traceback</summary><pre class="log">${esc(r.detail)}</pre></details>` : ""}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">Nenhum log.</td></tr>`}</tbody></table></div></div>`;
+  };
+  $("#lg-form", view).addEventListener("submit", (e) => { e.preventDefault(); st.level = $("#lg-level", view).value; st.q = $("#lg-q", view).value.trim(); load(); });
+  await load();
+}
+
 // ---------------------------------------------------------------- router
 const ROUTES = {
   dashboard: ["Dashboard", viewDashboard],
@@ -1012,13 +1095,15 @@ const ROUTES = {
   reports: ["Relatórios", viewReports],
   environments: ["Ambientes", viewEnvironments],
   webhooks: ["Webhooks", viewWebhooks],
+  settings: ["Configuração", viewSettings],
+  logs: ["Logs", viewLogs],
 };
 
 async function route() {
   const [name = "dashboard", id] = location.hash.replace(/^#\/?/, "").split("/");
   const key = ROUTES[name] ? name : "dashboard";
   const [title, fn] = ROUTES[key];
-  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === key));
+  $$("#nav a, #nav-foot a").forEach((a) => a.classList.toggle("active", a.dataset.route === key));
   $("#page-title").textContent = title;
   $("#sidebar").classList.remove("open");
   S.charts = [];
@@ -1032,15 +1117,11 @@ async function route() {
 }
 
 function initTheme() {
-  const saved = (() => { try { return localStorage.getItem("cw-theme"); } catch { return null; } })();
-  if (saved) document.documentElement.dataset.theme = saved;
-  $("#theme-toggle").addEventListener("click", () => {
-    const dark = document.documentElement.dataset.theme
-      ? document.documentElement.dataset.theme === "dark"
-      : matchMedia("(prefers-color-scheme: dark)").matches;
-    const next = dark ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("cw-theme", next); } catch { /* ignore */ }
+  const root = document.documentElement, box = $("#theme-toggle");
+  box.checked = root.dataset.theme === "dark";
+  box.addEventListener("change", () => {
+    root.dataset.theme = box.checked ? "dark" : "light";
+    try { localStorage.setItem("cw-theme", root.dataset.theme); } catch { /* ignore */ }
     route();
   });
 }

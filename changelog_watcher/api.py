@@ -25,10 +25,13 @@ from .analysis import (
 )
 from .config import SECRET_MASK, get_settings, mask_secret
 from .db import get_db
-from .models import Deployment, Environment, Project, Release, Report, Snapshot, Webhook, utcnow
+from .models import AppSetting, Deployment, Environment, LogEntry, Project, Release, Report, Snapshot, Webhook, utcnow
 from .refresh import STATE, run_refresh
 from .report import create_report
-from .scheduler import next_runs
+from apscheduler.triggers.cron import CronTrigger
+from pydantic import BaseModel, Field
+
+from .scheduler import effective_schedule, next_runs, reschedule
 from .schemas import (
     EnvironmentIn,
     EnvironmentOut,
@@ -71,6 +74,7 @@ def _commit(session: Session):
 @router.get("/meta")
 def meta():
     s = get_settings()
+    sch = effective_schedule()
     return {
         "source_types": SOURCE_TYPES,
         "webhook_kinds": WEBHOOK_KINDS,
@@ -83,8 +87,8 @@ def meta():
         },
         "age_buckets": [b[0] for b in AGE_BUCKETS],
         "schedule": {
-            "refresh_interval_minutes": s.refresh_interval_minutes,
-            "report_cron": s.report_cron,
+            "refresh_interval_minutes": sch["refresh_interval_minutes"],
+            "report_cron": sch["report_cron"],
             "timezone": s.timezone,
             "next_runs": next_runs(),
         },
@@ -297,9 +301,12 @@ def status(environment_id: list[int] | None = Query(None), db: Session = Depends
 
 
 @router.get("/dashboard")
-def dashboard(environment_id: list[int] | None = Query(None), db: Session = Depends(get_db)):
+def dashboard(environment_id: list[int] | None = Query(None), namespace: str | None = None, db: Session = Depends(get_db)):
     envs = [e for e in load_environments(db) if not environment_id or e.id in environment_id]
     statuses = compute_statuses(db, [e.id for e in envs])
+    namespaces = sorted({st.namespace for st in statuses if st.namespace})
+    if namespace:
+        statuses = [st for st in statuses if st.namespace == namespace]
     overall = summarize(statuses)
     most_outdated = sorted(
         (s for s in statuses if s.status not in ("up_to_date", "unknown")),
@@ -307,6 +314,7 @@ def dashboard(environment_id: list[int] | None = Query(None), db: Session = Depe
     )[:15]
     counts_projects = db.scalar(select(func.count()).select_from(Project))
     return {
+        "namespaces": namespaces,
         "overall": overall,
         "environments": summaries_by_environment(statuses, envs),
         "most_outdated": [s.to_dict() for s in most_outdated],
@@ -485,3 +493,49 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
     w.last_sent_at = utcnow()
     w.last_status = ("OK" if result["ok"] else "ERRO") + f": {result.get('detail', '')} (teste)"
     return result
+
+
+# --------------------------------------------------------------- settings
+class SettingsIn(BaseModel):
+    report_cron: str = Field(min_length=1)
+    refresh_interval_minutes: int = Field(ge=0)
+
+
+def _settings_out() -> dict:
+    return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs()}
+
+
+@router.get("/settings")
+def get_app_settings():
+    return _settings_out()
+
+
+@router.put("/settings")
+def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
+    cron = body.report_cron.strip()
+    try:
+        CronTrigger.from_crontab(cron)
+    except ValueError as exc:
+        raise HTTPException(422, f"expressão cron inválida: {exc}") from exc
+    for key, value in (("report_cron", cron), ("refresh_interval_minutes", str(body.refresh_interval_minutes))):
+        row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
+        row.value = value
+        db.add(row)
+    db.commit()
+    reschedule()
+    return _settings_out()
+
+
+# ------------------------------------------------------------------- logs
+@router.get("/logs")
+def list_logs(level: str | None = None, q: str | None = None, limit: int = Query(300, le=1000), db: Session = Depends(get_db)):
+    stmt = select(LogEntry).order_by(LogEntry.id.desc()).limit(limit)
+    if level:
+        stmt = stmt.where(LogEntry.level == level.upper())
+    if q:
+        stmt = stmt.where(LogEntry.message.ilike(f"%{q}%"))
+    return [
+        {"id": e.id, "created_at": e.created_at.isoformat(), "level": e.level, "logger": e.logger,
+         "message": e.message, "detail": e.detail}
+        for e in db.scalars(stmt)
+    ]

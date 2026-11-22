@@ -156,6 +156,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
                 dep.detection_error = err
                 failed += 1
                 errors.append(f"{names[dep_id]}: {err}")
+                log.warning("detecção falhou: %s: %s", names[dep_id], err)
                 DETECTIONS.labels(env_names[dep_id], "error").inc()
     return ok, failed, errors
 
@@ -230,6 +231,7 @@ async def run_refresh(project_ids: list[int] | None = None, fetch: bool = True, 
                     await asyncio.gather(*(one(pid) for pid in ids))
             store_snapshots()
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
+            log.info("atualização concluída: %s projeto(s) ok, %s com erro, %s novas versões", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
             REFRESH_TOTAL.labels("ok" if STATE.success else "partial").inc()
         except Exception as exc:
             log.exception("refresh failed")

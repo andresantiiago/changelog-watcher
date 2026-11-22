@@ -185,3 +185,27 @@ def test_adds_missing_columns(tmp_path):
     assert "version_scheme" in cols and "detection_mode" in cols
     assert sqlite3.connect(path).execute("SELECT version_scheme, enabled FROM projects").fetchone() == ("semver", 1)
     dbmod.init_engine("sqlite:///:memory:")
+
+
+def test_dashboard_namespace_filter(client, seeded):
+    d = client.get("/api/dashboard").json()
+    assert d["namespaces"] == []
+    pid = client.get("/api/projects").json()[0]["id"]
+    body = client.get(f"/api/projects/{pid}").json()
+    body["workload_namespace"] = "infra"
+    body["deployments"] = {str(x["environment_id"]): x for x in body["deployments"]}
+    assert client.put(f"/api/projects/{pid}", json=body).status_code == 200
+    assert client.get("/api/dashboard").json()["namespaces"] == ["infra"]
+    assert client.get("/api/dashboard?namespace=infra").json()["overall"]["total"] < d["overall"]["total"]
+    assert client.get("/api/dashboard?namespace=nada").json()["overall"]["total"] == 0
+
+
+def test_settings_and_logs(client):
+    assert client.put("/api/settings", json={"report_cron": "xx", "refresh_interval_minutes": 5}).status_code == 422
+    r = client.put("/api/settings", json={"report_cron": "0 8 * * fri", "refresh_interval_minutes": 30})
+    assert r.json()["report_cron"] == "0 8 * * fri"
+    assert client.get("/api/meta").json()["schedule"]["refresh_interval_minutes"] == 30
+    import logging
+    logging.getLogger("changelog_watcher.test").warning("falha de teste")
+    logs = client.get("/api/logs?level=warning&q=teste").json()
+    assert logs and logs[0]["message"] == "falha de teste"

@@ -109,6 +109,7 @@ class DeploymentStatus:
     detection_error: str | None = None
     project_error: str | None = None
     tags: list = field(default_factory=list)
+    namespace: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -147,6 +148,7 @@ def deployment_status(
         detection_error=deployment.detection_error,
         project_error=project.last_error,
         tags=list(project.tags or []),
+        namespace=deployment.namespace_override or project.workload_namespace,
     )
     for attr in ("latest", "latest_patch", "latest_minor", "latest_major"):
         v: Version | None = getattr(info, attr)
