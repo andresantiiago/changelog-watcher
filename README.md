@@ -202,9 +202,9 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 | `SEED_OVERWRITE` | `false` | seed sobrescreve alterações feitas pela UI |
 | `GITHUB_TOKEN` / `GITHUB_API_URL` | — / `https://api.github.com` | token e API (GitHub Enterprise) |
 | `GITLAB_TOKEN` / `GITLAB_URL` | — / `https://gitlab.com` | token e URL do GitLab |
-| `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa) (padrão; pode ser alterado na página Configuração) |
+| `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa); padrão, editável na página Configuração |
 | `REFRESH_ON_STARTUP` | `true` | busca ao iniciar |
-| `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal (padrão; pode ser alterado na página Configuração) |
+| `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal; padrão, editável na página Configuração |
 | `REPORT_DAYS` | `7` | janela de "novas versões" do relatório |
 | `REPORT_SEND_ENABLED` | `true` | envia o relatório agendado aos webhooks |
 | `TZ` | `UTC` | fuso do agendador |
@@ -214,6 +214,32 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API (`/metrics` e `/healthz` ficam abertos) |
 | `SCHEDULER_ENABLED` | `true` | desativa o agendador interno |
 | `METRICS_CACHE_SECONDS` | `30` | cache das métricas calculadas |
+
+### Criando os tokens
+
+Todos são opcionais, mas recomendados. Nunca commite o valor: passe por variável de
+ambiente (ou Secret do Kubernetes) e, nos campos da UI/seed, referencie com `${NOME}`.
+
+**`GITHUB_TOKEN`** — evita o limite de 60 requisições/hora da API e permite ler repositórios privados.
+
+1. GitHub → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → *Generate new token*.
+2. Defina uma validade e, em *Repository access*, escolha *Public repositories (read-only)*. Para
+   repositórios privados, selecione-os e conceda a permissão *Contents: Read-only*.
+3. Copie o token (`github_pat_…`) e exporte `GITHUB_TOKEN`. Um token *classic* sem nenhum escopo
+   também funciona para repositórios públicos (para privados, use o escopo `repo`).
+4. GitHub Enterprise: gere o token na sua instância e configure também `GITHUB_API_URL`.
+
+**`GITLAB_TOKEN`** — GitLab → *Preferences* → *Access Tokens* (ou *Settings → Access Tokens* de um
+projeto/grupo) com o escopo `read_api`. Para instalações próprias, configure `GITLAB_URL`.
+
+**Token do Prometheus** (campo *token* de um ambiente com autenticação `bearer`) — só é necessário se o
+Prometheus/Thanos estiver atrás de autenticação. Use um token de leitura da sua infraestrutura, por exemplo:
+
+- Prometheus exposto por um proxy com ServiceAccount (OpenShift, oauth2-proxy):
+  `kubectl create token <serviceaccount> -n <namespace> --duration=8760h`, com permissão apenas de leitura/consulta.
+- Serviços gerenciados (Grafana Cloud, Thanos/Mimir com gateway): o API token de leitura do próprio serviço.
+
+Um Prometheus sem autenticação (ex.: kube-prometheus-stack acessado dentro do cluster) usa `none` e não precisa de token.
 
 ## Webhooks
 
