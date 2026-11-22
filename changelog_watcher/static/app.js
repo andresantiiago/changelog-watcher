@@ -187,7 +187,7 @@ function tooltipFor(el) {
 }
 
 /** Horizontal 100% stacked bars, one row per environment. */
-function stackedBars(el, rows, keys, colorOf, labelOf) {
+function stackedBars(el, rows, keys, colorOf, labelOf, onPick = null) {
   registerChart(() => {
     if (!el.isConnected) return;
     const W = Math.max(el.clientWidth, 280);
@@ -235,6 +235,7 @@ function stackedBars(el, rows, keys, colorOf, labelOf) {
         tip.show(`<div class="t">${esc(row.label)}</div><div class="r"><span><i style="background:${colorOf(k)}"></i>${esc(labelOf(k))}</span><b>${row.values[k]} (${Math.round((row.values[k] / total) * 100)}%)</b></div>`, ev.clientX - b.left, ev.clientY - b.top);
       });
       p.addEventListener("mouseleave", () => tip.hide());
+      if (onPick) { p.style.cursor = "pointer"; p.addEventListener("click", () => onPick(rows[p.dataset.row], p.dataset.key)); }
     });
   });
 }
@@ -434,6 +435,22 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("[data-err-refresh]") && S.refresh) showError(S.refresh.errors.join("\n\n") || "Sem detalhes.", "Erros da última atualização");
 });
 
+/** Jump to the applications list with a filter ({status, env}) or to another route ({href}). */
+function goTo(go) {
+  if (go.href) { location.hash = go.href; return; }
+  const st = viewApps.state ||= { q: "", status: "", tag: "", env: "" };
+  Object.assign(st, { q: "", tag: "", status: go.status || "", env: go.env ? String(go.env) : "" });
+  location.hash = "#/apps";
+}
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-go]");
+  if (el && !e.target.closest("a,button")) goTo(JSON.parse(el.dataset.go));
+});
+document.addEventListener("keydown", (e) => {
+  const el = e.target.closest?.("[data-go]");
+  if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); goTo(JSON.parse(el.dataset.go)); }
+});
+
 // ================================================================ VIEWS
 function envFilterBar(onChange, selected) {
   const items = [{ id: "", name: "Todos os ambientes" }, ...S.envs];
@@ -441,8 +458,9 @@ function envFilterBar(onChange, selected) {
   return { html, bind(root) { $$("[data-env]", root).forEach((b) => b.addEventListener("click", () => onChange(b.dataset.env ? Number(b.dataset.env) : null))); } };
 }
 
-function kpi(label, value, foot = "", extra = "", cls = "") {
-  return `<div class="card kpi ${cls}"><div class="label">${label}</div><div class="value num">${value}</div>${extra}${foot ? `<div class="foot">${foot}</div>` : ""}</div>`;
+function kpi(label, value, foot = "", extra = "", cls = "", go = null) {
+  const nav = go ? ` data-go="${esc(JSON.stringify(go))}" role="link" tabindex="0"` : "";
+  return `<div class="card kpi ${cls}"${nav}><div class="label">${label}</div><div class="value num">${value}</div>${extra}${foot ? `<div class="foot">${foot}</div>` : ""}</div>`;
 }
 
 function updatesCell(s) {
@@ -469,14 +487,14 @@ async function viewDashboard(view) {
     <div class="filters">${filter.html}${d.namespaces.length ? `<select id="ns-filter" aria-label="Namespace"><option value="">Todos os namespaces</option>${d.namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}<div class="spacer" style="flex:1"></div>
       <button type="button" class="btn ghost sm kpi-toggle" id="kpi-toggle" aria-expanded="${!kpisHidden}" aria-controls="kpis"><span>Indicadores</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
     <div class="grid kpis" id="kpis" ${kpisHidden ? "hidden" : ""}>
-      ${kpi("Ambiente atualizado", pct(ratio), `${o.counts.up_to_date} de ${o.known} com versão conhecida`, `<div class="meter"><i style="width:${(ratio || 0) * 100}%"></i></div>`, "hero")}
-      ${kpi("Implantações monitoradas", num(o.total), `${d.projects} aplicações · ${o.counts.unknown} sem versão identificada`)}
-      ${kpi(`${badge("patch", "Bugfix")} pendente`, num(o.patch_pending), `${o.counts.patch} só com bugfix pendente`)}
-      ${kpi(`${badge("minor", "Minor")} pendente`, num(o.minor_pending), `${o.counts.minor} com minor como maior salto`)}
-      ${kpi(`${badge("major", "Major")} pendente`, num(o.major_pending), `${o.counts.major} implantações`)}
-      ${kpi("Idade acumulada", `${num(o.libyears, 1)} <span class="small muted">libyears</span>`, "soma do atraso entre a versão em uso e a mais recente")}
-      ${kpi("Atraso médio", days(o.avg_outdated_days), `maior atraso: ${days(o.max_outdated_days)}`)}
-      ${kpi("Diferenças entre ambientes", num(d.drift_count), `<a href="#/compare">comparar ambientes</a>`)}
+      ${kpi("Ambiente atualizado", pct(ratio), `${o.counts.up_to_date} de ${o.known} com versão conhecida`, `<div class="meter"><i style="width:${(ratio || 0) * 100}%"></i></div>`, "hero", { status: "up_to_date", env: S.envFilter })}
+      ${kpi("Implantações monitoradas", num(o.total), `${d.projects} aplicações · ${o.counts.unknown} sem versão identificada`, "", "", { env: S.envFilter })}
+      ${kpi(`${badge("patch", "Bugfix")} pendente`, num(o.patch_pending), `${o.counts.patch} só com bugfix pendente`, "", "", { status: "has_patch", env: S.envFilter })}
+      ${kpi(`${badge("minor", "Minor")} pendente`, num(o.minor_pending), `${o.counts.minor} com minor como maior salto`, "", "", { status: "has_minor", env: S.envFilter })}
+      ${kpi(`${badge("major", "Major")} pendente`, num(o.major_pending), `${o.counts.major} implantações`, "", "", { status: "has_major", env: S.envFilter })}
+      ${kpi("Idade acumulada", `${num(o.libyears, 1)} <span class="small muted">libyears</span>`, "soma do atraso entre a versão em uso e a mais recente", "", "", { status: "outdated", env: S.envFilter })}
+      ${kpi("Atraso médio", days(o.avg_outdated_days), `maior atraso: ${days(o.max_outdated_days)}`, "", "", { status: "outdated", env: S.envFilter })}
+      ${kpi("Diferenças entre ambientes", num(d.drift_count), `<a href="#/compare">comparar ambientes</a>`, "", "", { href: "#/compare" })}
     </div>
     <div class="grid cols-2" style="margin-top:16px">
       <div class="card"><div class="card-head"><h2>Status por ambiente</h2><span class="sub">maior atualização pendente de cada implantação</span></div><div class="chart" id="ch-status"></div>${legend(STATUS_KEYS.map((k) => ({ label: STATUS[k].label, color: statusColor(k) })))}</div>
@@ -509,7 +527,7 @@ async function viewDashboard(view) {
   $("#ns-filter", view)?.addEventListener("change", (e) => { S.nsFilter = e.target.value; route(); });
   bindRowLinks(view);
 
-  stackedBars($("#ch-status", view), d.environments.map((e) => ({ label: e.environment, values: e.counts })), STATUS_KEYS, statusColor, (k) => STATUS[k].label);
+  stackedBars($("#ch-status", view), d.environments.map((e) => ({ label: e.environment, envId: e.environment_id, values: e.counts })), STATUS_KEYS, statusColor, (k) => STATUS[k].label, (row, k) => goTo({ status: k, env: row.envId }));
   columnChart($("#ch-age", view), Object.entries(o.age_buckets).map(([label, value]) => ({ label, value, hint: "Implantações desatualizadas" })));
 
   const byEnv = {};
@@ -536,11 +554,13 @@ async function viewApps(view) {
   const allTags = [...new Set(S.projects.flatMap((p) => p.tags || []))].sort();
   const namespaces = [...new Set(statuses.map((s) => s.namespace).filter(Boolean))].sort();
   if (!namespaces.includes(S.nsFilter)) S.nsFilter = "";
-  const st = viewApps.state ||= { q: "", status: "", tag: "" };
+  const st = viewApps.state ||= { q: "", status: "", tag: "", env: "" };
+  if (st.env && !S.envs.some((e) => String(e.id) === st.env)) st.env = "";
   view.innerHTML = `
     <div class="filters">
       <input type="search" id="f-q" placeholder="Buscar aplicação…" value="${esc(st.q)}">
-      <select id="f-status"><option value="">Todos os status</option>${STATUS_KEYS.map((k) => opt(k, STATUS[k].label, st.status)).join("")}<option value="outdated" ${st.status === "outdated" ? "selected" : ""}>Qualquer atualização</option></select>
+      <select id="f-status"><option value="">Todos os status</option>${STATUS_KEYS.map((k) => opt(k, STATUS[k].label, st.status)).join("")}<option value="outdated" ${st.status === "outdated" ? "selected" : ""}>Qualquer atualização</option>${opt("has_patch", "Qualquer bugfix pendente", st.status)}${opt("has_minor", "Qualquer minor pendente", st.status)}${opt("has_major", "Qualquer major pendente", st.status)}</select>
+      ${S.envs.length > 1 ? `<select id="f-env" aria-label="Ambiente"><option value="">Todos os ambientes</option>${S.envs.map((e) => opt(e.id, e.name, st.env)).join("")}</select>` : ""}
       ${allTags.length ? `<select id="f-tag"><option value="">Todas as tags</option>${allTags.map((t) => opt(t, t, st.tag)).join("")}</select>` : ""}
       ${namespaces.length ? `<select id="f-ns" aria-label="Namespace"><option value="">Todos os namespaces</option>${namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}
       <div class="spacer" style="flex:1"></div>
@@ -556,11 +576,11 @@ async function viewApps(view) {
       if (st.q && !`${p.name} ${p.repository} ${(p.tags || []).join(" ")}`.toLowerCase().includes(st.q.toLowerCase())) return false;
       if (st.tag && !(p.tags || []).includes(st.tag)) return false;
       if (S.nsFilter && !statuses.some((s) => s.project_id === p.id && s.namespace === S.nsFilter)) return false;
-      if (st.status) {
-        const ss = S.envs.map((e) => byKey[`${p.id}:${e.id}`]).filter(Boolean);
-        if (st.status === "outdated") return ss.some((s) => ["patch", "minor", "major"].includes(s.status));
-        return ss.some((s) => s.status === st.status);
-      }
+      const ss = S.envs.filter((e) => !st.env || String(e.id) === st.env).map((e) => byKey[`${p.id}:${e.id}`]).filter(Boolean);
+      if (st.env && !ss.length) return false;
+      if (st.status === "outdated") return ss.some((s) => ["patch", "minor", "major"].includes(s.status));
+      if (st.status.startsWith("has_")) return ss.some((s) => s[`latest_${st.status.slice(4)}`]);
+      if (st.status) return ss.some((s) => s.status === st.status);
       return true;
     });
     body.innerHTML = rows.map((p) => {
@@ -588,6 +608,7 @@ async function viewApps(view) {
   $("#f-q", view).addEventListener("input", debounce((e) => { st.q = e.target.value; draw(); }, 150));
   $("#f-status", view).addEventListener("change", (e) => { st.status = e.target.value; draw(); });
   $("#f-ns", view)?.addEventListener("change", (e) => { S.nsFilter = e.target.value; draw(); });
+  $("#f-env", view)?.addEventListener("change", (e) => { st.env = e.target.value; draw(); });
   $("#f-tag", view)?.addEventListener("change", (e) => { st.tag = e.target.value; draw(); });
   $("#new-app", view).addEventListener("click", () => projectForm());
 }
