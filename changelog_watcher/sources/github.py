@@ -7,6 +7,8 @@ import httpx
 from ..versioning import parse_version
 from .base import ReleaseData, SourceError, get_json, parse_datetime
 
+MAX_TAG_DATE_LOOKUPS = 25  # commits fetched to date unknown tags per run
+
 
 def _headers(settings, accept: str = "application/vnd.github+json") -> dict:
     headers = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
@@ -88,7 +90,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: 
 
     missing = [t for t in tags if t.published_at is None and t.commit_sha]
     missing.sort(key=lambda t: parse_version(t.tag, project.tag_pattern) or parse_version("0.0.0"), reverse=True)
-    missing = missing[: settings.max_tag_date_lookups]
+    missing = missing[:MAX_TAG_DATE_LOOKUPS]
     sem = asyncio.Semaphore(5)
 
     async def lookup(t: ReleaseData):

@@ -262,9 +262,7 @@ select {
 
 .brand-icon { flex: none; }
 :root[data-theme="dark"] .toast.error { color: #2e3440; }
-.dark-only { display: none; }
-:root[data-theme="dark"] .light-only { display: none; }
-:root[data-theme="dark"] .dark-only { display: inline; }
+:root[data-theme="dark"] .brand-icon { filter: invert(1) hue-rotate(180deg); }
 .kpi-toggle { gap: 6px; }
 .kpi-toggle svg { width: 16px; height: 16px; transition: transform .15s; }
 .kpi-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }

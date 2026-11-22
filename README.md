@@ -226,7 +226,6 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 | `TZ` | `UTC` | fuso do agendador |
 | `PUBLIC_URL` | — | link para a UI incluído no relatório |
 | `MAX_RELEASE_PAGES` | `3` | páginas de 100 releases/tags buscadas por fonte |
-| `MAX_TAG_DATE_LOOKUPS` | `25` | commits consultados para datar tags do GitHub |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API (`/metrics` e `/healthz` ficam abertos) |
 | `SCHEDULER_ENABLED` | `true` | desativa o agendador interno |
 | `METRICS_CACHE_SECONDS` | `30` | cache das métricas calculadas |
