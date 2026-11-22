@@ -464,9 +464,11 @@ async function viewDashboard(view) {
     return;
   }
   const ratio = o.up_to_date_ratio;
+  const kpisHidden = localStorage.getItem("cw-kpis-hidden") === "1";
   view.innerHTML = `
-    <div class="filters">${filter.html}${d.namespaces.length ? `<select id="ns-filter" aria-label="Namespace"><option value="">Todos os namespaces</option>${d.namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}</div>
-    <div class="grid kpis">
+    <div class="filters">${filter.html}${d.namespaces.length ? `<select id="ns-filter" aria-label="Namespace"><option value="">Todos os namespaces</option>${d.namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}<div class="spacer" style="flex:1"></div>
+      <button type="button" class="btn ghost sm kpi-toggle" id="kpi-toggle" aria-expanded="${!kpisHidden}" aria-controls="kpis"><span>Indicadores</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
+    <div class="grid kpis" id="kpis" ${kpisHidden ? "hidden" : ""}>
       ${kpi("Ambiente atualizado", pct(ratio), `${o.counts.up_to_date} de ${o.known} com versão conhecida`, `<div class="meter"><i style="width:${(ratio || 0) * 100}%"></i></div>`, "hero")}
       ${kpi("Implantações monitoradas", num(o.total), `${d.projects} aplicações · ${o.counts.unknown} sem versão identificada`)}
       ${kpi(`${badge("patch", "Bugfix")} pendente`, num(o.patch_pending), `${o.counts.patch} só com bugfix pendente`)}
@@ -496,6 +498,13 @@ async function viewDashboard(view) {
         }).join("") || `<tr><td colspan="8" class="empty">Nada desatualizado 🎉</td></tr>`}</tbody>
       </table></div>
     </div>`;
+  const kpiBtn = $("#kpi-toggle", view);
+  kpiBtn.addEventListener("click", () => {
+    const hide = !$("#kpis", view).hidden;
+    $("#kpis", view).hidden = hide;
+    kpiBtn.setAttribute("aria-expanded", String(!hide));
+    try { localStorage.setItem("cw-kpis-hidden", hide ? "1" : "0"); } catch { /* ignore */ }
+  });
   filter.bind(view);
   $("#ns-filter", view)?.addEventListener("change", (e) => { S.nsFilter = e.target.value; route(); });
   bindRowLinks(view);
