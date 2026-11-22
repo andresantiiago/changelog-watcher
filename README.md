@@ -184,6 +184,22 @@ Para PostgreSQL use `database.url` ou `database.existingSecret`.
 > `replicaCount: 1` — com mais réplicas o relatório seria enviado por cada uma.
 > O chart bloqueia mais de uma réplica com SQLite.
 
+### Cluster kind local (imagem local)
+
+Constrói a imagem, carrega no nó do kind e instala com [`deploy/helm/values-kind.yaml`](deploy/helm/values-kind.yaml)
+(Prometheus do próprio cluster, `pullPolicy: Never`):
+
+```bash
+docker build -t changelog-watcher:local .
+kind load docker-image changelog-watcher:local --name lab   # nome do seu cluster kind
+helm upgrade --install changelog-watcher deploy/helm/changelog-watcher \
+  -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml
+kubectl -n changelog-watcher port-forward svc/changelog-watcher 8080:80   # http://localhost:8080
+```
+
+Após mudar o código: refaça o `docker build` e o `kind load`, e reinicie com
+`kubectl -n changelog-watcher rollout restart deploy/changelog-watcher`.
+
 ## Configuração
 
 Tudo pode ser gerenciado pela interface. O arquivo YAML de seed
