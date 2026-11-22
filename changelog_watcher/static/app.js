@@ -567,7 +567,7 @@ async function viewApps(view) {
       <button class="btn primary" id="new-app" type="button">+ Nova aplicação</button>
     </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Aplicação</th>${S.envs.map((e) => `<th>${esc(e.name)}</th>`).join("")}<th>Mais recente</th><th></th></tr></thead>
+      <thead><tr><th>Aplicação</th><th>Namespace</th>${S.envs.map((e) => `<th>${esc(e.name)}</th>`).join("")}<th>Mais recente</th><th></th></tr></thead>
       <tbody id="apps-body"></tbody>
     </table></div></div>`;
   const body = $("#apps-body", view);
@@ -585,11 +585,13 @@ async function viewApps(view) {
     });
     body.innerHTML = rows.map((p) => {
       const any = S.envs.map((e) => byKey[`${p.id}:${e.id}`]).find(Boolean);
+      const nss = [...new Set(S.envs.map((e) => byKey[`${p.id}:${e.id}`]?.namespace).filter(Boolean))];
       return `<tr class="clickable" data-href="#/apps/${p.id}">
         <td><div><b>${esc(p.name)}</b> ${p.enabled ? "" : '<span class="chip">desativada</span>'}</div>
           <div class="small muted">${esc(S.meta.source_types[p.source_type] || p.source_type)} · ${esc(p.repository)}</div>
           ${p.last_error ? `<div class="err" data-err="${esc(p.last_error)}" title="Clique para ver o erro">⚠ ${esc(p.last_error.slice(0, 80))}</div>` : ""}
           ${(p.tags || []).length ? `<div class="pill-row" style="margin-top:4px">${p.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}</td>
+        <td>${nss.length ? nss.map((n) => `<span class="chip">${esc(n)}</span>`).join(" ") : '<span class="muted">—</span>'}</td>
         ${S.envs.map((e) => {
           const s = byKey[`${p.id}:${e.id}`];
           if (!s) return `<td class="muted small">não implantado</td>`;
@@ -599,7 +601,7 @@ async function viewApps(view) {
         <td>${ver(any?.latest_version)}<div class="small muted">${any?.latest_version_date ? fmtDate(any.latest_version_date) : ""}</div></td>
         <td class="nowrap right"><button class="btn sm" data-refresh="${p.id}" type="button" title="Buscar releases">↻</button> <button class="btn sm" data-edit="${p.id}" type="button">Editar</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="${S.envs.length + 3}" class="empty">${S.projects.length ? "Nenhuma aplicação com esses filtros." : "Nenhuma aplicação cadastrada ainda."}</td></tr>`;
+    }).join("") || `<tr><td colspan="${S.envs.length + 4}" class="empty">${S.projects.length ? "Nenhuma aplicação com esses filtros." : "Nenhuma aplicação cadastrada ainda."}</td></tr>`;
     bindRowLinks(body);
     $$("[data-edit]", body).forEach((b) => b.addEventListener("click", () => projectForm(S.projects.find((p) => p.id === Number(b.dataset.edit)))));
     $$("[data-refresh]", body).forEach((b) => b.addEventListener("click", () => startRefresh([Number(b.dataset.refresh)])));

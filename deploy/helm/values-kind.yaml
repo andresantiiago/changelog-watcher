@@ -2,14 +2,34 @@
 #   docker build -t changelog-watcher:local .
 #   kind load docker-image changelog-watcher:local --name lab
 #   helm upgrade --install changelog-watcher deploy/helm/changelog-watcher -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml
+#   kubectl -n traefik port-forward svc/traefik 8000:80   # http://changelog-watcher.localhost:8000
 image:
   repository: changelog-watcher
   tag: local
   pullPolicy: Never          # a imagem foi carregada no nó com `kind load`
 
 config:
-  publicUrl: http://localhost:8080
+  publicUrl: http://changelog-watcher.localhost:8000
   refreshOnStartup: true
+  seedOverwrite: true          # o YAML é a fonte de verdade a cada start
+
+# Modo em memória: sem volume e sem arquivo de banco. Tudo o que vem de `seed` é recriado a cada
+# start; o que for adicionado pela UI vale só até o pod reiniciar.
+database:
+  url: "sqlite:///:memory:"
+persistence:
+  enabled: false
+
+# Exposição via Traefik (IngressClass "traefik" do cluster). Os navegadores resolvem *.localhost
+# para 127.0.0.1, então basta o port-forward do Traefik acima (o kind não publica a porta 80 no host).
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: changelog-watcher.localhost
+      paths:
+        - path: /
+          pathType: Prefix
 
 # Prometheus do kube-prometheus-stack do próprio cluster (acesso interno, sem auth).
 seed:
@@ -45,4 +65,31 @@ seed:
       detection_mode: image
       image_pattern: registry.k8s.io/kube-state-metrics/kube-state-metrics
       workload_namespace: monitoring
+      deployments: {kind-lab: {}}
+    # namespace nginx
+    - name: nginx-atualizado
+      source_type: github_releases
+      repository: nginx/nginx
+      detection_mode: workload
+      workload_kind: deployment
+      workload_namespace: nginx
+      workload_name: nginx-atualizado
+      deployments: {kind-lab: {}}
+    - name: nginx-desatualizado
+      source_type: github_releases
+      repository: nginx/nginx
+      detection_mode: workload
+      workload_kind: deployment
+      workload_namespace: nginx
+      workload_name: nginx-desatualizado
+      deployments: {kind-lab: {}}
+    # namespace traefik
+    - name: traefik
+      source_type: github_releases
+      repository: traefik/traefik
+      detection_mode: workload
+      workload_kind: deployment
+      workload_namespace: traefik
+      workload_name: traefik
+      container_name: traefik
       deployments: {kind-lab: {}}
