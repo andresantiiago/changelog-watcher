@@ -78,16 +78,18 @@ config:
   # Variáveis extras (não secretas).
   extraEnv: {}
 
-# Banco de dados. Vazio = SQLite no volume persistente.
+# Banco de dados. Padrão: em memória (sem volume; o estado vem do `seed` a cada start e o que
+# for adicionado pela UI se perde ao reiniciar o pod). Para persistir: url "" (SQLite no PVC,
+# com persistence.enabled=true) ou uma URL PostgreSQL.
 # Ex.: postgresql+psycopg://user:pass@host:5432/changelog_watcher
 # (prefira databaseUrlSecret para não expor a senha)
 database:
-  url: ""
+  url: "sqlite:///:memory:"
   existingSecret: ""      # Secret com a chave abaixo contendo a URL
   existingSecretKey: DATABASE_URL
 
 persistence:
-  enabled: true
+  enabled: false
   storageClass: ""
   accessModes: [ReadWriteOnce]
   size: 1Gi

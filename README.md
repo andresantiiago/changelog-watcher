@@ -176,9 +176,12 @@ seed:
       url: ${SLACK_WEBHOOK_URL}
 ```
 
-O chart cria Deployment, Service, PVC (SQLite), Secret, ConfigMap do seed e,
-opcionalmente, Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
-Para PostgreSQL use `database.url` ou `database.existingSecret`.
+O chart cria Deployment, Service, Secret, ConfigMap do seed e, opcionalmente, PVC,
+Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
+Por padrão o banco é **em memória** (`database.url: sqlite:///:memory:`, sem volume): o estado
+vem do `seed` a cada start e o que for adicionado pela UI se perde ao reiniciar o pod. Para
+persistir, use `database.url: ""` com `persistence.enabled: true` (SQLite em PVC) ou
+PostgreSQL via `database.url` / `database.existingSecret`.
 
 > O agendador (atualização e relatório) roda dentro do processo. Mantenha
 > `replicaCount: 1` — com mais réplicas o relatório seria enviado por cada uma.
