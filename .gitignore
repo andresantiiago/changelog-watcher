@@ -229,3 +229,6 @@ data/
 *.db-wal
 
 .DS_Store
+
+# Cache local de ferramentas de design
+.impeccable/
