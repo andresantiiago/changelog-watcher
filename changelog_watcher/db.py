@@ -26,27 +26,27 @@ def is_memory(url: str) -> bool:
 
 
 def make_engine(url: str):
-    """A new engine for ``url``. For an in-memory URL that is a new, empty database."""
-    kwargs: dict = {"pool_pre_ping": True}
-    if url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
-        path = url.split("///", 1)[-1]
-        if path and not is_memory(url):
-            directory = os.path.dirname(os.path.abspath(path))
-            os.makedirs(directory, exist_ok=True)
-        if is_memory(url):
-            from sqlalchemy.pool import StaticPool
+    """A new SQLite engine for ``url``. For an in-memory URL that is a new, empty database."""
+    if not url.startswith("sqlite"):
+        raise ValueError(
+            f"DATABASE_URL inválida ({url.split(':', 1)[0]}): apenas SQLite é suportado "
+            "(sqlite:////data/changelog-watcher.db ou sqlite:///:memory:)"
+        )
+    kwargs: dict = {"pool_pre_ping": True, "connect_args": {"check_same_thread": False}}
+    if is_memory(url):
+        from sqlalchemy.pool import StaticPool
 
-            kwargs["poolclass"] = StaticPool
+        kwargs["poolclass"] = StaticPool
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(url.split("///", 1)[-1])), exist_ok=True)
     engine = create_engine(url, **kwargs)
-    if url.startswith("sqlite"):
 
-        @event.listens_for(engine, "connect")
-        def _sqlite_pragmas(dbapi_conn, _):  # pragma: no cover - trivial
-            cur = dbapi_conn.cursor()
-            cur.execute("PRAGMA foreign_keys=ON")
-            cur.execute("PRAGMA journal_mode=WAL")
-            cur.close()
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _):  # pragma: no cover - trivial
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.close()
 
     return engine
 
@@ -78,7 +78,7 @@ def _add_missing_columns(engine) -> None:
                     continue
                 ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col.type.compile(engine.dialect)}'
                 default = col.default.arg if col.default is not None and col.default.is_scalar else None
-                if default is not None:  # rendered per dialect: PostgreSQL rejects "BOOLEAN DEFAULT 1"
+                if default is not None:  # literal rendered by the dialect (e.g. booleans as 1/0)
                     sql = literal(default, col.type).compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
                     ddl += f" DEFAULT {sql}"
                 conn.execute(text(ddl))

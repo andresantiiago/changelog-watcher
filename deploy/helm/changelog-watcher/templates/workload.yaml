@@ -1,17 +1,28 @@
-{{- $sqlite := and (not .Values.database.url) (not .Values.database.existingSecret) -}}
-{{- /* também database.url "sqlite:..." (o padrão é em memória): banco e agendador por pod */ -}}
-{{- $singleReplica := or $sqlite (hasPrefix "sqlite" .Values.database.url) -}}
-{{- if and $singleReplica (gt (int .Values.replicaCount) 1) }}
-{{- fail "SQLite suporta apenas replicaCount=1; configure database.url (PostgreSQL) para mais réplicas" }}
+{{- $type := .Values.persistence.type -}}
+{{- if not (has $type (list "pvc" "inMemory")) }}
+{{- fail (printf "persistence.type deve ser \"pvc\" ou \"inMemory\" (recebido: %q)" $type) }}
 {{- end }}
+{{- $pvc := eq $type "pvc" -}}
+{{- /* pvc: StatefulSet com o SQLite no volume (dados mantidos); inMemory: Deployment sem volume (dados perdidos ao reiniciar).
+       Sempre 1 réplica: banco SQLite e agendador rodam dentro do processo. */ -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: {{ ternary "StatefulSet" "Deployment" $pvc }}
 metadata:
   name: {{ include "cw.fullname" . }}
   labels: {{- include "cw.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
-  {{- if $singleReplica }}
+  replicas: 1
+  {{- if $pvc }}
+  # Service comum (não headless): com 1 réplica o DNS por pod não é usado.
+  serviceName: {{ include "cw.fullname" . }}
+  # RollingUpdate num StatefulSet de 1 réplica apaga o pod antigo antes de criar o novo
+  # (como o Recreate do Deployment), então o PVC RWO e o SQLite nunca têm dois donos.
+  # Parallel: não trava o rollout esperando um pod quebrado ficar Ready (com OrderedReady,
+  # voltar a versão após um pod em CrashLoop/ImagePull exigiria apagar o pod na mão).
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  {{- else }}
   strategy:
     type: Recreate
   {{- end }}
@@ -24,7 +35,7 @@ spec:
         {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
       annotations:
         checksum/seed: {{ dict "e" .Values.seed.environments "p" .Values.seed.projects "w" .Values.seed.webhooks | toJson | sha256sum }}
-        checksum/secret: {{ dict "s" .Values.secrets.values "a" .Values.auth "d" .Values.database.url | toJson | sha256sum }}
+        checksum/secret: {{ dict "s" .Values.secrets.values "a" .Values.auth | toJson | sha256sum }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
@@ -66,16 +77,8 @@ spec:
             - name: CONFIG_FILE
               value: /config/config.yaml
             {{- end }}
-            {{- if $sqlite }}
             - name: DATABASE_URL
-              value: sqlite:////data/changelog-watcher.db
-            {{- else if .Values.database.existingSecret }}
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.database.existingSecret }}
-                  key: {{ .Values.database.existingSecretKey }}
-            {{- end }}
+              value: {{ ternary "sqlite:////data/changelog-watcher.db" "sqlite:///:memory:" $pvc | quote }}
             {{- if and .Values.auth.enabled .Values.auth.existingSecret }}
             - name: AUTH_USERNAME
               valueFrom: {secretKeyRef: {name: {{ .Values.auth.existingSecret }}, key: AUTH_USERNAME}}
@@ -103,7 +106,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            {{- if $sqlite }}
+            {{- if $pvc }}
             - name: data
               mountPath: /data
             {{- end }}
@@ -115,14 +118,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if $sqlite }}
+        {{- if and $pvc .Values.persistence.existingClaim }}
         - name: data
-          {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ .Values.persistence.existingClaim | default (include "cw.fullname" .) }}
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+            claimName: {{ .Values.persistence.existingClaim }}
         {{- end }}
         {{- if include "cw.hasSeed" . }}
         - name: seed
@@ -138,3 +137,17 @@ spec:
       {{- with .Values.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if and $pvc (not .Values.persistence.existingClaim) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels: {{- include "cw.selectorLabels" . | nindent 10 }}
+      spec:
+        accessModes: {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

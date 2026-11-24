@@ -187,6 +187,15 @@ def test_adds_missing_columns(tmp_path):
     dbmod.init_engine("sqlite:///:memory:")
 
 
+def test_only_sqlite_is_supported():
+    import pytest
+
+    from changelog_watcher.db import make_engine
+
+    with pytest.raises(ValueError, match="apenas SQLite"):
+        make_engine("postgresql+psycopg://u:p@h/db")
+
+
 def test_dashboard_namespace_filter(client, seeded):
     d = client.get("/api/dashboard").json()
     assert d["namespaces"] == []

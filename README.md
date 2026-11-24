@@ -176,16 +176,24 @@ seed:
       url: ${SLACK_WEBHOOK_URL}
 ```
 
-O chart cria Deployment, Service, Secret, ConfigMap do seed e, opcionalmente, PVC,
-Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
-Por padrão o banco é **em memória** (`database.url: sqlite:///:memory:`, sem volume): o estado
-vem do `seed` a cada start e o que for adicionado pela UI se perde ao reiniciar o pod. Para
-persistir, use `database.url: ""` com `persistence.enabled: true` (SQLite em PVC) ou
-PostgreSQL via `database.url` / `database.existingSecret`.
+O chart cria o workload (StatefulSet ou Deployment, ver abaixo), Service, Secret, ConfigMap
+do seed e, opcionalmente, Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
 
-> O agendador (atualização e relatório) roda dentro do processo. Mantenha
-> `replicaCount: 1` — com mais réplicas o relatório seria enviado por cada uma.
-> O chart bloqueia mais de uma réplica com SQLite.
+O banco é sempre SQLite (não há suporte a banco externo) e o modo é escolhido em
+`persistence.type`:
+
+| `persistence.type` | Workload | Dados ao reiniciar o pod |
+|---|---|---|
+| `pvc` (padrão) | StatefulSet com PVC em `/data` (`1Gi`, StorageClass `gp3`) | **mantidos** |
+| `inMemory` | Deployment sem volume | **perdidos**: o estado volta a ser só o do `seed`; o que foi feito pela UI, histórico e relatórios somem |
+
+Use `inMemory` apenas para testes (é o que o `values-kind.yaml` usa). O PVC sobrevive a um
+`helm uninstall`; o tamanho/StorageClass não muda depois de criado (o `volumeClaimTemplates`
+do StatefulSet é imutável), então para crescer edite o PVC diretamente. Para usar um PVC já
+existente, informe `persistence.existingClaim`.
+
+> O agendador (atualização e relatório) e o SQLite rodam dentro do processo, por isso o
+> chart sempre cria **1 réplica**.
 
 ### Cluster kind local (imagem local)
 
@@ -216,7 +224,7 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./data/changelog-watcher.db` | SQLAlchemy URL (`postgresql+psycopg://…` também funciona) |
+| `DATABASE_URL` | `sqlite:///./data/changelog-watcher.db` | banco SQLite (único suportado); `sqlite:///:memory:` = em memória, dados perdidos ao reiniciar |
 | `CONFIG_FILE` | — | YAML de seed |
 | `SEED_OVERWRITE` | `false` | seed sobrescreve alterações feitas pela UI |
 | `GITHUB_TOKEN` / `GITHUB_API_URL` | — / `https://api.github.com` | token e API (GitHub Enterprise) |

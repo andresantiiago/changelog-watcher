@@ -20,7 +20,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.1"]
 dev = ["pytest>=8", "respx>=0.21"]
 
 [project.scripts]

@@ -16,7 +16,7 @@ from sqlalchemy import text
 from . import __version__
 from .api import router
 from .config import get_settings
-from .db import get_engine, init_engine, session_scope
+from .db import get_engine, init_engine, is_memory, session_scope
 from . import logstore
 from .metrics import WatcherCollector
 from .refresh import run_refresh
@@ -41,6 +41,8 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     init_engine()
     logstore.install()
+    if is_memory(settings.database_url):
+        log.warning("banco em memória: os dados serão perdidos ao reiniciar (use um arquivo SQLite em volume persistente para mantê-los)")
     if settings.config_file:
         with session_scope() as s:
             stats = load_seed(s, settings.config_file, overwrite=settings.seed_overwrite)

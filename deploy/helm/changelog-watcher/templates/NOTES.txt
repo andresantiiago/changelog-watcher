@@ -1,5 +1,11 @@
 Changelog Watcher instalado!
 
+{{- if eq .Values.persistence.type "pvc" }}
+Banco: SQLite em PVC (StatefulSet) – os dados são mantidos ao reiniciar o pod.
+{{- else }}
+ATENÇÃO: banco em memória (persistence.type=inMemory) – os dados serão PERDIDOS ao reiniciar o pod.
+{{- end }}
+
 {{- if .Values.ingress.enabled }}
 Acesse: {{ range .Values.ingress.hosts }}http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
 {{- else }}

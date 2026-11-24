@@ -7,10 +7,8 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# A aplicação roda o agendador interno (refresh + relatório semanal).
-# Com SQLite use apenas 1 réplica. Para mais réplicas use PostgreSQL e
-# desative o agendador nas réplicas extras (ver README).
-replicaCount: 1
+# Sempre 1 réplica: o banco SQLite e o agendador interno (refresh + relatório semanal)
+# rodam dentro do processo.
 
 serviceAccount:
   create: true
@@ -78,22 +76,20 @@ config:
   # Variáveis extras (não secretas).
   extraEnv: {}
 
-# Banco de dados. Padrão: em memória (sem volume; o estado vem do `seed` a cada start e o que
-# for adicionado pela UI se perde ao reiniciar o pod). Para persistir: url "" (SQLite no PVC,
-# com persistence.enabled=true) ou uma URL PostgreSQL.
-# Ex.: postgresql+psycopg://user:pass@host:5432/changelog_watcher
-# (prefira databaseUrlSecret para não expor a senha)
-database:
-  url: "sqlite:///:memory:"
-  existingSecret: ""      # Secret com a chave abaixo contendo a URL
-  existingSecretKey: DATABASE_URL
-
+# Armazenamento do banco SQLite.
+#   pvc      – StatefulSet com um PVC montado em /data: os dados são MANTIDOS ao reiniciar
+#              ou atualizar o pod (o PVC também sobrevive a um `helm uninstall`).
+#   inMemory – Deployment sem volume: os dados são PERDIDOS a cada reinício; o estado volta
+#              a ser só o do `seed` e o que foi feito pela UI (histórico, relatórios) some.
+#              Útil para testes locais (ver values-kind.yaml).
 persistence:
-  enabled: false
-  storageClass: ""
+  type: pvc
+  # Campos abaixo valem só para type=pvc. O PVC vem do volumeClaimTemplates do StatefulSet,
+  # que o Kubernetes não deixa alterar depois de criado (para aumentar, edite o PVC direto).
+  storageClass: gp3
   accessModes: [ReadWriteOnce]
   size: 1Gi
-  existingClaim: ""
+  existingClaim: ""       # usar um PVC já existente em vez de criar um
 
 # Segredos expostos como variáveis de ambiente. Podem ser referenciados no
 # seed/UI com ${NOME}, ex.: prometheus_token: ${PROM_PROD_TOKEN}

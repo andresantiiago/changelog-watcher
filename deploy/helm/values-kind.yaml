@@ -8,6 +8,10 @@ image:
   tag: local
   pullPolicy: Never          # a imagem foi carregada no nó com `kind load`
 
+# Banco em memória: os dados são perdidos a cada reinício do pod (o seed abaixo recria o estado).
+persistence:
+  type: inMemory
+
 config:
   publicUrl: http://changelog-watcher.localhost:8000
   refreshOnStartup: true
