@@ -177,7 +177,32 @@ seed:
 ```
 
 O chart cria o workload (StatefulSet ou Deployment, ver abaixo), Service, Secret, ConfigMap
-do seed e, opcionalmente, Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
+do seed e, opcionalmente, Ingress, ServiceMonitor, PrometheusRule, NetworkPolicies e o
+ConfigMap do dashboard.
+
+#### NetworkPolicies
+
+Para clusters que bloqueiam tráfego por padrão, há duas NetworkPolicies independentes
+(ambas desligadas por padrão e ambas liberam DNS na porta 53):
+
+| Flag | Libera |
+|---|---|
+| `networkPolicy.prometheus.enabled` | ingress do namespace do Prometheus (scrape do `/metrics`) e egress para ele (consultas, porta `9090` por padrão) |
+| `networkPolicy.internet.enabled` | egress para a internet pública (`0.0.0.0/0` menos as redes privadas em `except`): fontes de releases, webhooks e Prometheus/Thanos externos |
+
+```yaml
+networkPolicy:
+  prometheus:
+    enabled: true
+    namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+    allowIngressFrom:                  # quem mais acessa a UI, ex.: o ingress controller
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+  internet:
+    enabled: true
+```
+
+> Com `networkPolicy.prometheus` ligada o pod só aceita conexões do Prometheus e de
+> `allowIngressFrom`: sem incluir o ingress controller, a UI fica inacessível pelo Ingress.
 
 O banco é sempre SQLite (não há suporte a banco externo) e o modo é escolhido em
 `persistence.type`:

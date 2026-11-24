@@ -14,6 +14,12 @@ Acesse localmente:
   abra http://localhost:8080
 {{- end }}
 
+{{- with .Values.networkPolicy.prometheus }}
+{{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
+ATENÇÃO: networkPolicy.prometheus está ligada sem allowIngressFrom: o Ingress não alcança o pod.
+{{- end }}
+{{- end }}
+
 Métricas Prometheus: /metrics {{- if .Values.metrics.serviceMonitor.enabled }} (ServiceMonitor criado){{ end }}
 {{- if .Values.grafana.dashboard.enabled }}
 Dashboard do Grafana publicado no ConfigMap {{ include "cw.fullname" . }}-dashboard

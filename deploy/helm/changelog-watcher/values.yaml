@@ -151,6 +151,34 @@ metrics:
     # Alerta quando existe atualização major/minor pendente há mais de N dias.
     outdatedDaysThreshold: 180
 
+# NetworkPolicies opcionais. Cada uma também libera DNS (porta 53).
+# ATENÇÃO: com qualquer uma ligada, o pod passa a bloquear todo egress não liberado; com
+# `prometheus` ligada, também todo ingress não liberado (inclusive o ingress controller,
+# ver allowIngressFrom).
+networkPolicy:
+  # Comunicação com o Prometheus: scrape do /metrics (ingress) e consultas à API (egress).
+  prometheus:
+    enabled: false
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+    # Restringe aos pods do Prometheus dentro do namespace; {} = todos os pods.
+    podSelector: {}
+    #  matchLabels:
+    #    app.kubernetes.io/name: prometheus
+    # Portas da API no pod (porta de destino, não a do Service); [] = todas.
+    ports: [9090]
+    # Outras origens que podem acessar a UI/API, ex.: o ingress controller.
+    allowIngressFrom: []
+    #  - namespaceSelector:
+    #      matchLabels:
+    #        kubernetes.io/metadata.name: ingress-nginx
+  # Saída para a internet: fontes de releases, webhooks e Prometheus/Thanos externos.
+  internet:
+    enabled: false
+    # Destinos bloqueados (padrão: redes privadas, ou seja, só internet pública).
+    except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+
 grafana:
   dashboard:
     # Cria um ConfigMap com o dashboard para o sidecar do Grafana.
