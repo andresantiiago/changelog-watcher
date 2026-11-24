@@ -1,0 +1,65 @@
+{{- define "cw.networkPolicyDNS" -}}
+# DNS (kube-dns, NodeLocal DNSCache etc.): sem ele nenhum nome resolve.
+- ports:
+    - {protocol: UDP, port: 53}
+    - {protocol: TCP, port: 53}
+{{- end -}}
+
+{{- with .Values.networkPolicy.prometheus }}
+{{- if .enabled }}
+{{- $peer := dict "namespaceSelector" .namespaceSelector "podSelector" .podSelector }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cw.fullname" $ }}-prometheus
+  labels: {{- include "cw.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cw.selectorLabels" $ | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Scrape do /metrics pelo Prometheus.
+    - from: [{{ toJson $peer }}]
+      ports: [{port: http}]
+    {{- with .allowIngressFrom }}
+    # Demais origens liberadas (ingress controller etc.).
+    - from: {{- toYaml . | nindent 8 }}
+      ports: [{port: http}]
+    {{- end }}
+  egress:
+    # Consultas à API do Prometheus/Thanos.
+    - to: [{{ toJson $peer }}]
+      {{- with .ports }}
+      ports:
+        {{- range . }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+      {{- end }}
+    {{- include "cw.networkPolicyDNS" $ | nindent 4 }}
+---
+{{- end }}
+{{- end }}
+
+{{- with .Values.networkPolicy.internet }}
+{{- if .enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cw.fullname" $ }}-internet
+  labels: {{- include "cw.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cw.selectorLabels" $ | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    # Fontes de releases (GitHub, GitLab, Docker Hub, páginas web) e webhooks.
+    # ponytail: só IPv4; em cluster dual-stack, adicionar um ipBlock ::/0 aqui.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with .except }}
+            except: {{- toYaml . | nindent 14 }}
+            {{- end }}
+    {{- include "cw.networkPolicyDNS" $ | nindent 4 }}
+{{- end }}
+{{- end }}

@@ -16,7 +16,7 @@ jobs:
       contents: read
       pull-requests: write  # comentário com o resumo dos testes no PR
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -54,10 +54,10 @@ jobs:
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/changelog-watcher
-      - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true > /dev/null
+      - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true --set networkPolicy.prometheus.enabled=true --set networkPolicy.internet.enabled=true > /dev/null
       - name: pvc gera StatefulSet; inMemory gera Deployment; tipo inválido falha
         run: |
           helm template ci deploy/helm/changelog-watcher | grep -q "^kind: StatefulSet"
