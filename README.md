@@ -88,8 +88,23 @@ os workloads agrupados por release:
 repositório GitHub/GitLab, CHANGELOG, repositório Helm ou a URL de uma **página
 web** (fonte `webpage`: toda versão encontrada no texto vira uma release; use o
 **padrão de tag** para ignorar versões de outros softwares citadas na página e a
-**URL do CHANGELOG** para trazer notas e datas). Imagens do `ghcr.io` já sugerem o
-repositório GitHub.
+**URL do CHANGELOG** para trazer notas e datas).
+
+Sem repositório informado, o formulário **sugere as fontes mais prováveis** (o link
+**sugerir fonte**, automático ao vir da descoberta). Clique numa delas para preencher o
+formulário. As sugestões vêm, nesta ordem, de:
+
+1. label `org.opencontainers.image.source` da imagem, lido do registry com pull anônimo
+   (Docker Hub, ghcr.io, quay.io…): o repositório oficial, quando a imagem o publica;
+2. imagem no `ghcr.io` → repositório GitHub de mesmo nome;
+3. [Artifact Hub](https://artifacthub.io): repositórios Helm com um chart de mesmo nome
+   (do label `helm.sh/chart` ou do nome da aplicação), comparando pelo `appVersion`;
+4. imagem no Docker Hub (fonte `dockerhub`);
+5. busca no GitHub por repositórios com o mesmo nome, por estrelas (use `GITHUB_TOKEN`
+   para não esbarrar no limite de 10 buscas/min sem autenticação).
+
+Cada consulta é independente: se uma falhar (sem internet, imagem privada, limite da
+API), só aparecem menos sugestões. A API é `GET /api/suggest-source?name=&image=&chart=`.
 
 ## Executando
 

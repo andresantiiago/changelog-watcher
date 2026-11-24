@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -58,6 +59,7 @@ from .schemas import (
     WebhookOut,
 )
 from .sources import SOURCE_TYPES
+from .suggest import suggest_sources
 from .webhooks import WEBHOOK_KINDS, deliver_report, record_status, send_webhook
 
 router = APIRouter(prefix="/api")
@@ -175,6 +177,15 @@ async def discover_environment(env_id: int, namespace: str | None = None, db: Se
         p = tracked.get((s["workload_namespace"], s.get("workload_name")))
         g["project"] = {"id": p.id, "name": p.name} if p else None
     return {"ok": True, "groups": groups}
+
+
+@router.get("/suggest-source")
+async def suggest_source(name: str | None = None, image: str | None = None, chart: str | None = None):
+    """Likely release sources for an app (image label, Artifact Hub, Docker Hub, GitHub search)."""
+    s = get_settings()
+    async with httpx.AsyncClient(timeout=s.http_timeout, follow_redirects=True,
+                                 headers={"User-Agent": "changelog-watcher"}) as client:
+        return {"candidates": await suggest_sources(client, s, name=name, image=image, chart=chart)}
 
 
 # --------------------------------------------------------------- projects

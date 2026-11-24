@@ -617,8 +617,9 @@ async function viewApps(view) {
   $("#new-app", view).addEventListener("click", () => projectForm());
 }
 
-/** ``p`` is an existing project, or (with isNew) a prefill such as a discovery suggestion. */
-function projectForm(p = null, isNew = !p) {
+/** ``p`` is an existing project, or (with isNew) a prefill such as a discovery suggestion.
+ * ``hint`` ({image, chart}) feeds the source suggestion. */
+function projectForm(p = null, isNew = !p, hint = {}) {
   if (isNew) p = { source_type: "github_releases", version_scheme: "semver", detection_mode: "none", workload_kind: "deployment", enabled: true, tags: [], deployments: [], ...p };
   const deps = Object.fromEntries((p.deployments || []).map((d) => [d.environment_id, d]));
   const st = S.meta.source_types;
@@ -631,7 +632,8 @@ function projectForm(p = null, isNew = !p) {
     </div></fieldset>
     <fieldset><legend>Fonte do changelog / releases</legend><div class="form-grid">
       ${field("Tipo de fonte", `<select name="source_type">${Object.entries(st).map(([k, v]) => opt(k, v, p.source_type)).join("")}</select>`)}
-      ${field("Repositório / URL *", inp("repository", p.repository, 'required placeholder="argoproj/argo-cd"'), '<span id="repo-hint"></span>')}
+      ${field("Repositório / URL *", inp("repository", p.repository, 'required placeholder="argoproj/argo-cd"'), '<span id="repo-hint"></span> · <a href="#" id="repo-suggest-btn">sugerir fonte</a>')}
+      <div class="full" id="repo-suggest" hidden></div>
       <div data-show="helm_index">${field("Nome do chart", inp("chart_name", p.chart_name))}</div>
       <div data-show="helm_index"><label class="check" style="margin-top:22px"><input type="checkbox" name="use_app_version" ${p.use_app_version ? "checked" : ""}> Comparar pelo appVersion</label></div>
       <div data-show="github_releases github_tags gitlab_releases gitlab_tags">${field("URL da API (opcional)", inp("source_url", p.source_url, 'placeholder="https://github.empresa.com/api/v3"'), "GitHub Enterprise ou GitLab self-hosted")}</div>
@@ -702,6 +704,33 @@ function projectForm(p = null, isNew = !p) {
   $("[name=source_type]", form).addEventListener("change", sync);
   $("[name=detection_mode]", form).addEventListener("change", sync);
   sync();
+
+  const box = $("#repo-suggest", form);
+  const suggest = async () => {
+    box.hidden = false;
+    box.innerHTML = '<span class="small muted">Procurando fontes…</span>';
+    const q = new URLSearchParams({ name: $("[name=name]", form).value, image: hint.image || $("[name=image_pattern]", form).value, chart: hint.chart || "" });
+    try {
+      const { candidates } = await api(`/api/suggest-source?${q}`);
+      box.innerHTML = candidates.length
+        ? `<div class="small muted" style="margin-bottom:4px">Fontes prováveis – clique para usar:</div><div class="pill-row">${candidates.map((c, i) =>
+          `<button type="button" class="btn sm" data-cand="${i}">${esc(st[c.source_type] || c.source_type)} · <b>${esc(c.repository)}</b>${c.chart_name ? ` (${esc(c.chart_name)})` : ""} <span class="muted">– ${esc(c.reason)}</span></button>`).join("")}</div>`
+        : '<span class="small muted">Nenhuma fonte encontrada – informe o repositório manualmente.</span>';
+      $$("[data-cand]", box).forEach((b) => b.addEventListener("click", () => {
+        const c = candidates[Number(b.dataset.cand)];
+        $("[name=source_type]", form).value = c.source_type;
+        $("[name=repository]", form).value = c.repository;
+        $("[name=chart_name]", form).value = c.chart_name || "";
+        $("[name=use_app_version]", form).checked = !!c.use_app_version;
+        sync();
+        box.hidden = true;
+      }));
+    } catch (err) {
+      box.innerHTML = `<span class="small muted">Falha ao sugerir: ${esc(err.message)}</span>`;
+    }
+  };
+  $("#repo-suggest-btn", form).addEventListener("click", (e) => { e.preventDefault(); suggest(); });
+  if (isNew && !p.repository && (hint.image || hint.chart)) suggest();
 }
 
 // ------------------------------------------------------------ app detail
@@ -1040,7 +1069,7 @@ async function viewDiscover(view) {
         ${g.workloads.map((w) => `<tr><td class="nowrap"><span class="muted small">${esc(w.kind)}</span> <b>${esc(w.name)}</b></td><td>${w.containers.map((c) => `<div class="small"><span class="muted">${esc(c.container)}</span> <span class="mono">${esc(c.image)}</span></div>`).join("")}</td></tr>`).join("")}
       </tbody></table></div></details>
     </div>`).join("") || `<div class="card empty">Nenhum container encontrado.</div>`;
-    $$("[data-track]", out).forEach((b) => b.addEventListener("click", () => projectForm(r.groups[Number(b.dataset.track)].suggestion, true)));
+    $$("[data-track]", out).forEach((b) => b.addEventListener("click", () => { const g = r.groups[Number(b.dataset.track)]; projectForm(g.suggestion, true, { image: g.image, chart: g.chart }); }));
   };
   $("#dc-all", view).addEventListener("click", async (e) => {
     const todo = st.result.groups.filter((g) => !g.project);
