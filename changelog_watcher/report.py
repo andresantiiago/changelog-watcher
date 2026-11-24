@@ -27,14 +27,14 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(days=days)
     environments = [e for e in load_environments(session) if not environment_ids or e.id in environment_ids]
-    statuses = compute_statuses(session, [e.id for e in environments] or None, now=now)
+    statuses = compute_statuses(session, [e.id for e in environments], now=now)
     summaries = summaries_by_environment(statuses, environments)
     releases = recent_releases(session, days=days, now=now)
     outdated = sorted(
         (s.to_dict() for s in statuses if s.status not in ("up_to_date",)),
         key=lambda s: (s["environment"], -s["level"], -s["outdated_days"], s["project"]),
     )
-    matrix = version_matrix(statuses, environments)
+    matrix = version_matrix(statuses)
     return {
         "generated_at": now.isoformat(),
         "period_start": start.isoformat(),
@@ -55,14 +55,8 @@ def _pct(ratio) -> str:
 
 
 def _arrow(st: dict) -> str:
-    parts = []
-    if st.get("latest_patch"):
-        parts.append(f"bugfix **{st['latest_patch']}**")
-    if st.get("latest_minor"):
-        parts.append(f"minor **{st['latest_minor']}**")
-    if st.get("latest_major"):
-        parts.append(f"major **{st['latest_major']}**")
-    return ", ".join(parts) or "—"
+    kinds = (("patch", "bugfix"), ("minor", "minor"), ("major", "major"))
+    return ", ".join(f"{name} **{st[f'latest_{k}']}**" for k, name in kinds if st.get(f"latest_{k}")) or "—"
 
 
 def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) -> str:

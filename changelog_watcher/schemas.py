@@ -7,12 +7,21 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .sources import SOURCE_TYPES
+from .webhooks import WEBHOOK_KINDS
+
+DETECTION_MODES = {
+    "none": "Sem detecção (versão manual)",
+    "workload": "Workload (Deployment/StatefulSet/DaemonSet)",
+    "helm": "Release Helm (todos os workloads do release)",
+    "image": "Padrão de imagem",
+    "query": "Consulta PromQL personalizada",
+}
 
 SourceType = Literal[tuple(SOURCE_TYPES)]  # type: ignore[valid-type]
-DetectionMode = Literal["none", "workload", "helm", "image", "query"]
+DetectionMode = Literal[tuple(DETECTION_MODES)]  # type: ignore[valid-type]
 WorkloadKind = Literal["deployment", "statefulset", "daemonset", "cronjob"]
 VersionSource = Literal["manual", "prometheus"]
-WebhookKind = Literal["generic", "slack", "teams", "discord", "google_chat"]
+WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
 
 
 def _check_regex(value: str | None) -> str | None:

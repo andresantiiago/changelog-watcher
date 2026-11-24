@@ -25,7 +25,6 @@ class Settings:
     gitlab_url: str = "https://gitlab.com"
     http_timeout: float = 20.0
     max_release_pages: int = 3
-    max_tag_date_lookups: int = 25
     refresh_interval_minutes: int = 360
     refresh_on_startup: bool = True
     report_cron: str = "0 9 * * mon"
@@ -52,13 +51,12 @@ class Settings:
             gitlab_url=e("GITLAB_URL", cls.gitlab_url).rstrip("/"),
             http_timeout=float(e("HTTP_TIMEOUT", "20")),
             max_release_pages=int(e("MAX_RELEASE_PAGES", "3")),
-            max_tag_date_lookups=int(e("MAX_TAG_DATE_LOOKUPS", "25")),
             refresh_interval_minutes=int(e("REFRESH_INTERVAL_MINUTES", "360")),
             refresh_on_startup=_bool(e("REFRESH_ON_STARTUP"), True),
             report_cron=e("REPORT_CRON", cls.report_cron),
             report_days=int(e("REPORT_DAYS", "7")),
             report_send_enabled=_bool(e("REPORT_SEND_ENABLED"), True),
-            timezone=e("TZ", e("TIMEZONE", "UTC")) or "UTC",
+            timezone=e("TZ", "UTC") or "UTC",
             public_url=(e("PUBLIC_URL", "") or "").rstrip("/"),
             auth_username=e("AUTH_USERNAME") or None,
             auth_password=e("AUTH_PASSWORD") or None,

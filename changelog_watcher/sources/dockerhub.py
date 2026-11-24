@@ -65,7 +65,8 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, hints: list[s
     for hint in hints or []:
         v = parse_version(hint)
         if v:
-            lines.add(f"{v.major}.{v.minor}")
+            # major_patch (postgres 16.2): the release line is the major ("16." substring filter).
+            lines.add(f"{v.major}." if project.version_scheme == "major_patch" else f"{v.major}.{v.minor}")
     for line in sorted(lines):
         url, params = f"{HUB}/repositories/{repo}/tags", {"page_size": 100, "ordering": "last_updated", "name": line}
         for _ in range(settings.max_release_pages):

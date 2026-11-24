@@ -176,13 +176,40 @@ seed:
       url: ${SLACK_WEBHOOK_URL}
 ```
 
-O chart cria Deployment, Service, PVC (SQLite), Secret, ConfigMap do seed e,
-opcionalmente, Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
-Para PostgreSQL use `database.url` ou `database.existingSecret`.
+O chart cria o workload (StatefulSet ou Deployment, ver abaixo), Service, Secret, ConfigMap
+do seed e, opcionalmente, Ingress, ServiceMonitor, PrometheusRule e o ConfigMap do dashboard.
 
-> O agendador (atualização e relatório) roda dentro do processo. Mantenha
-> `replicaCount: 1` — com mais réplicas o relatório seria enviado por cada uma.
-> O chart bloqueia mais de uma réplica com SQLite.
+O banco é sempre SQLite (não há suporte a banco externo) e o modo é escolhido em
+`persistence.type`:
+
+| `persistence.type` | Workload | Dados ao reiniciar o pod |
+|---|---|---|
+| `pvc` (padrão) | StatefulSet com PVC em `/data` (`1Gi`, StorageClass `gp3`) | **mantidos** |
+| `inMemory` | Deployment sem volume | **perdidos**: o estado volta a ser só o do `seed`; o que foi feito pela UI, histórico e relatórios somem |
+
+Use `inMemory` apenas para testes (é o que o `values-kind.yaml` usa). O PVC sobrevive a um
+`helm uninstall`; o tamanho/StorageClass não muda depois de criado (o `volumeClaimTemplates`
+do StatefulSet é imutável), então para crescer edite o PVC diretamente. Para usar um PVC já
+existente, informe `persistence.existingClaim`.
+
+> O agendador (atualização e relatório) e o SQLite rodam dentro do processo, por isso o
+> chart sempre cria **1 réplica**.
+
+### Cluster kind local (imagem local)
+
+Constrói a imagem, carrega no nó do kind e instala com [`deploy/helm/values-kind.yaml`](deploy/helm/values-kind.yaml)
+(Prometheus do próprio cluster, `pullPolicy: Never`):
+
+```bash
+docker build -t changelog-watcher:local .
+kind load docker-image changelog-watcher:local --name lab   # nome do seu cluster kind
+helm upgrade --install changelog-watcher deploy/helm/changelog-watcher \
+  -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml
+kubectl -n changelog-watcher port-forward svc/changelog-watcher 8080:80   # http://localhost:8080
+```
+
+Após mudar o código: refaça o `docker build` e o `kind load`, e reinicie com
+`kubectl -n changelog-watcher rollout restart deploy/changelog-watcher`.
 
 ## Configuração
 
@@ -197,23 +224,48 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./data/changelog-watcher.db` | SQLAlchemy URL (`postgresql+psycopg://…` também funciona) |
+| `DATABASE_URL` | `sqlite:///./data/changelog-watcher.db` | banco SQLite (único suportado); `sqlite:///:memory:` = em memória, dados perdidos ao reiniciar |
 | `CONFIG_FILE` | — | YAML de seed |
 | `SEED_OVERWRITE` | `false` | seed sobrescreve alterações feitas pela UI |
 | `GITHUB_TOKEN` / `GITHUB_API_URL` | — / `https://api.github.com` | token e API (GitHub Enterprise) |
 | `GITLAB_TOKEN` / `GITLAB_URL` | — / `https://gitlab.com` | token e URL do GitLab |
-| `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa) |
+| `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa); padrão, editável na página Configuração |
 | `REFRESH_ON_STARTUP` | `true` | busca ao iniciar |
-| `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal |
+| `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal; padrão, editável na página Configuração |
 | `REPORT_DAYS` | `7` | janela de "novas versões" do relatório |
 | `REPORT_SEND_ENABLED` | `true` | envia o relatório agendado aos webhooks |
 | `TZ` | `UTC` | fuso do agendador |
 | `PUBLIC_URL` | — | link para a UI incluído no relatório |
 | `MAX_RELEASE_PAGES` | `3` | páginas de 100 releases/tags buscadas por fonte |
-| `MAX_TAG_DATE_LOOKUPS` | `25` | commits consultados para datar tags do GitHub |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API (`/metrics` e `/healthz` ficam abertos) |
 | `SCHEDULER_ENABLED` | `true` | desativa o agendador interno |
 | `METRICS_CACHE_SECONDS` | `30` | cache das métricas calculadas |
+
+### Criando os tokens
+
+Todos são opcionais, mas recomendados. Nunca commite o valor: passe por variável de
+ambiente (ou Secret do Kubernetes) e, nos campos da UI/seed, referencie com `${NOME}`.
+
+**`GITHUB_TOKEN`** — evita o limite de 60 requisições/hora da API e permite ler repositórios privados.
+
+1. GitHub → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → *Generate new token*.
+2. Defina uma validade e, em *Repository access*, escolha *Public repositories (read-only)*. Para
+   repositórios privados, selecione-os e conceda a permissão *Contents: Read-only*.
+3. Copie o token (`github_pat_…`) e exporte `GITHUB_TOKEN`. Um token *classic* sem nenhum escopo
+   também funciona para repositórios públicos (para privados, use o escopo `repo`).
+4. GitHub Enterprise: gere o token na sua instância e configure também `GITHUB_API_URL`.
+
+**`GITLAB_TOKEN`** — GitLab → *Preferences* → *Access Tokens* (ou *Settings → Access Tokens* de um
+projeto/grupo) com o escopo `read_api`. Para instalações próprias, configure `GITLAB_URL`.
+
+**Token do Prometheus** (campo *token* de um ambiente com autenticação `bearer`) — só é necessário se o
+Prometheus/Thanos estiver atrás de autenticação. Use um token de leitura da sua infraestrutura, por exemplo:
+
+- Prometheus exposto por um proxy com ServiceAccount (OpenShift, oauth2-proxy):
+  `kubectl create token <serviceaccount> -n <namespace> --duration=8760h`, com permissão apenas de leitura/consulta.
+- Serviços gerenciados (Grafana Cloud, Thanos/Mimir com gateway): o API token de leitura do próprio serviço.
+
+Um Prometheus sem autenticação (ex.: kube-prometheus-stack acessado dentro do cluster) usa `none` e não precisa de token.
 
 ## Webhooks
 
@@ -325,3 +377,33 @@ python deploy/grafana/build_dashboard.py
 ```bash
 helm lint deploy/helm/changelog-watcher
 ```
+
+### Versionamento e releases
+
+Versões seguem `vX.Y.Z` (com `v`) no chart (`version`/`appVersion`), nas tags, na imagem e
+na release. O `pyproject.toml` segue o padrão do pip, sem `v` (`X.Y.Z`, rc como `X.Y.ZrcN`).
+
+Todo PR roda o workflow `ci` (testes, dashboard e Helm); o resultado de cada teste aparece no
+resumo da execução no GitHub Actions e num comentário no PR (atualizado a cada push). Cada merge na `main` roda o workflow `release`, que
+primeiro executa o `ci` e só então gera a release:
+
+1. o Copilot CLI lê as mudanças desde a última versão (commits, arquivos e diff) e responde
+   `major`, `minor` ou `patch` mais até 3 tópicos descrevendo o que mudou;
+2. a versão vem do `pyproject.toml`, do `Chart.yaml` ou de uma tag `vX.Y.Z-rcN` quando for
+   maior que a última tag `vX.Y.Z` (vale a maior). O sufixo `-rcN` é sempre removido: o merge
+   na `main` é a versão final (`v0.2.0-rc3` → `v0.2.0`). Senão a última tag é incrementada
+   pela classificação do Copilot (sem resposta válida, pelas mensagens de commit:
+   `BREAKING CHANGE`/`tipo!:`/`[major]` → major, `feat:`/`[minor]` → minor, o resto → patch);
+3. se o `pyproject.toml` ou o `Chart.yaml` ficaram desatualizados, o workflow faz o commit
+   corrigindo (`chore(release): vX.Y.Z [skip ci]`);
+4. cria a tag `vX.Y.Z`, publica `ghcr.io/andresantiiago/changelog-watcher` com as tags
+   `vX.Y.Z`, `vX.Y`, `latest` e `sha-<commit>`, e cria a release no GitHub com a descrição
+   do Copilot (ou notas automáticas, se ele falhar).
+
+Durante o desenvolvimento, criar uma tag `vX.Y.Z-rcN` (ex.: `git tag v0.2.0-rc1 && git push origin v0.2.0-rc1`)
+publica a imagem `vX.Y.Z-rcN` (sem mexer em `latest`) e uma pre-release no GitHub, sem
+commit na `main`. No merge seguinte a release sai como `vX.Y.Z`.
+
+O chart usa `appVersion` como tag da imagem, então cada versão do chart aponta para a
+imagem da mesma release. O workflow usa o secret `GH_TOKEN`: um token fine-grained com
+**Contents** (escrita, para o commit e a tag) e **Copilot Requests**.

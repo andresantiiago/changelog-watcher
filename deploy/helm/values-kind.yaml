@@ -1,0 +1,92 @@
+# Valores para rodar no cluster kind local com a imagem construída localmente.
+#   docker build -t changelog-watcher:local .
+#   kind load docker-image changelog-watcher:local --name lab
+#   helm upgrade --install changelog-watcher deploy/helm/changelog-watcher -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml
+#   kubectl -n traefik port-forward svc/traefik 8000:80   # http://changelog-watcher.localhost:8000
+image:
+  repository: changelog-watcher
+  tag: local
+  pullPolicy: Never          # a imagem foi carregada no nó com `kind load`
+
+# Banco em memória: os dados são perdidos a cada reinício do pod (o seed abaixo recria o estado).
+persistence:
+  type: inMemory
+
+config:
+  publicUrl: http://changelog-watcher.localhost:8000
+  refreshOnStartup: true
+  seedOverwrite: true          # o YAML é a fonte de verdade a cada start
+
+# Exposição via Traefik (IngressClass "traefik" do cluster). Os navegadores resolvem *.localhost
+# para 127.0.0.1, então basta o port-forward do Traefik acima (o kind não publica a porta 80 no host).
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: changelog-watcher.localhost
+      paths:
+        - path: /
+          pathType: Prefix
+
+# Prometheus do kube-prometheus-stack do próprio cluster (acesso interno, sem auth).
+seed:
+  environments:
+    - name: kind-lab
+      description: Cluster kind local
+      prometheus_url: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+  projects:
+    - name: grafana
+      source_type: github_releases
+      repository: grafana/grafana
+      detection_mode: image
+      image_pattern: docker.io/grafana/grafana
+      workload_namespace: monitoring
+      deployments: {kind-lab: {}}
+    - name: prometheus
+      source_type: github_releases
+      repository: prometheus/prometheus
+      detection_mode: image
+      image_pattern: quay.io/prometheus/prometheus
+      workload_namespace: monitoring
+      deployments: {kind-lab: {}}
+    - name: prometheus-operator
+      source_type: github_releases
+      repository: prometheus-operator/prometheus-operator
+      detection_mode: image
+      image_pattern: quay.io/prometheus-operator/prometheus-operator
+      workload_namespace: monitoring
+      deployments: {kind-lab: {}}
+    - name: kube-state-metrics
+      source_type: github_releases
+      repository: kubernetes/kube-state-metrics
+      detection_mode: image
+      image_pattern: registry.k8s.io/kube-state-metrics/kube-state-metrics
+      workload_namespace: monitoring
+      deployments: {kind-lab: {}}
+    # namespace nginx
+    - name: nginx-atualizado
+      source_type: github_releases
+      repository: nginx/nginx
+      detection_mode: workload
+      workload_kind: deployment
+      workload_namespace: nginx
+      workload_name: nginx-atualizado
+      deployments: {kind-lab: {}}
+    - name: nginx-desatualizado
+      source_type: github_releases
+      repository: nginx/nginx
+      detection_mode: workload
+      workload_kind: deployment
+      workload_namespace: nginx
+      workload_name: nginx-desatualizado
+      deployments: {kind-lab: {}}
+    # namespace traefik
+    - name: traefik
+      source_type: github_releases
+      repository: traefik/traefik
+      detection_mode: workload
+      workload_kind: deployment
+      workload_namespace: traefik
+      workload_name: traefik
+      container_name: traefik
+      deployments: {kind-lab: {}}

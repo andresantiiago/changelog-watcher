@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from itertools import permutations
+from itertools import combinations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -109,6 +109,7 @@ class DeploymentStatus:
     detection_error: str | None = None
     project_error: str | None = None
     tags: list = field(default_factory=list)
+    namespace: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -147,6 +148,7 @@ def deployment_status(
         detection_error=deployment.detection_error,
         project_error=project.last_error,
         tags=list(project.tags or []),
+        namespace=deployment.namespace_override or project.workload_namespace,
     )
     for attr in ("latest", "latest_patch", "latest_minor", "latest_major"):
         v: Version | None = getattr(info, attr)
@@ -196,7 +198,7 @@ def compute_statuses(
     for project in load_projects(session):
         versions = project_versions(project)
         for dep in project.deployments:
-            if environment_ids and dep.environment_id not in environment_ids:
+            if environment_ids is not None and dep.environment_id not in environment_ids:
                 continue
             out.append(deployment_status(project, dep, dep.environment, versions, now))
     return out
@@ -244,7 +246,7 @@ def summaries_by_environment(statuses: list[DeploymentStatus], environments: lis
 
 
 # ---------------------------------------------------------------- comparison
-def version_matrix(statuses: list[DeploymentStatus], environments: list[Environment]) -> list[dict]:
+def version_matrix(statuses: list[DeploymentStatus]) -> list[dict]:
     by_project: dict[int, dict] = {}
     for st in statuses:
         row = by_project.setdefault(
@@ -324,9 +326,7 @@ def drift_pairs(statuses: list[DeploymentStatus], environments: list[Environment
     for st in statuses:
         by_env[st.environment_id][st.project_id] = st.current_version
     out = []
-    for a, b in permutations(environments, 2):
-        if a.id > b.id:
-            continue
+    for a, b in combinations(sorted(environments, key=lambda e: e.id), 2):  # source = lower id
         common = set(by_env[a.id]) & set(by_env[b.id])
         differ = sum(1 for p in common if by_env[a.id][p] != by_env[b.id][p])
         out.append({"source": a.name, "target": b.name, "common": len(common), "different": differ})

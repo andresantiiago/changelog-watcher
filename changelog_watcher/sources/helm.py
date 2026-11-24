@@ -25,7 +25,8 @@ async def fetch_index(project, client: httpx.AsyncClient, settings) -> list[Rele
         raise SourceError(f"chart '{project.chart_name}' não encontrado em {url}")
     seen: dict[str, ReleaseData] = {}
     for entry in entries:
-        version = str(entry.get("appVersion") if project.use_app_version else entry.get("version") or "")
+        raw = entry.get("appVersion") if project.use_app_version else entry.get("version")
+        version = str(raw).strip() if raw is not None else ""
         if not version:
             continue
         created = parse_datetime(entry.get("created"))
@@ -40,6 +41,6 @@ async def fetch_index(project, client: httpx.AsyncClient, settings) -> list[Rele
         )
         # Several chart versions may ship the same appVersion: keep the oldest date.
         prev = seen.get(version)
-        if prev is None or (created and prev.published_at and created < prev.published_at):
+        if prev is None or (created and (not prev.published_at or created < prev.published_at)):
             seen[version] = data
     return list(seen.values())

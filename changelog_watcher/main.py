@@ -16,7 +16,8 @@ from sqlalchemy import text
 from . import __version__
 from .api import router
 from .config import get_settings
-from .db import get_engine, init_engine, session_scope
+from .db import get_engine, init_engine, is_memory, session_scope
+from . import logstore
 from .metrics import WatcherCollector
 from .refresh import run_refresh
 from .scheduler import start_scheduler, stop_scheduler
@@ -39,6 +40,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     init_engine()
+    logstore.install()
+    if is_memory(settings.database_url):
+        log.warning("banco em memória: os dados serão perdidos ao reiniciar (use um arquivo SQLite em volume persistente para mantê-los)")
     if settings.config_file:
         with session_scope() as s:
             stats = load_seed(s, settings.config_file, overwrite=settings.seed_overwrite)
@@ -59,7 +63,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     if settings.auth_username and settings.auth_password:
-        expected = (settings.auth_username, settings.auth_password)
+        # bytes: compare_digest raises TypeError on non-ASCII str
+        expected = (settings.auth_username.encode(), settings.auth_password.encode())
         open_paths = ("/healthz", "/readyz", "/metrics")
 
         @app.middleware("http")
@@ -69,9 +74,9 @@ def create_app() -> FastAPI:
             header = request.headers.get("authorization", "")
             if header.lower().startswith("basic "):
                 try:
-                    user, _, pwd = base64.b64decode(header[6:]).decode().partition(":")
+                    user, _, pwd = base64.b64decode(header[6:]).partition(b":")
                 except Exception:
-                    user = pwd = ""
+                    user = pwd = b""
                 if secrets.compare_digest(user, expected[0]) and secrets.compare_digest(pwd, expected[1]):
                     return await call_next(request)
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="changelog-watcher"'})
@@ -95,7 +100,13 @@ def create_app() -> FastAPI:
     def metrics():
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    class _Revalidate(StaticFiles):  # SPA has no build hash: make browsers revalidate (ETag -> 304) so UI updates apply on reload
+        async def get_response(self, path, scope):
+            resp = await super().get_response(path, scope)
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+    app.mount("/static", _Revalidate(directory=STATIC), name="static")
 
     @app.get("/", include_in_schema=False)
     def index():

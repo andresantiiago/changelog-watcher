@@ -161,6 +161,11 @@ class Snapshot(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+# Summary metrics stored per snapshot (the keys of analysis.summarize / its "counts").
+SNAPSHOT_FIELDS = ("total", "up_to_date", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
+                   "avg_outdated_days", "max_outdated_days", "versions_behind")
+
+
 class Webhook(Base):
     __tablename__ = "webhooks"
 
@@ -187,3 +192,23 @@ class Report(Base):
     markdown: Mapped[str] = mapped_column(Text)
     data: Mapped[dict] = mapped_column(JSON)
     delivery: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class AppSetting(Base):
+    """Runtime overrides of env-var settings, editable in the UI (key/value)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
+class LogEntry(Base):
+    __tablename__ = "log_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    level: Mapped[str] = mapped_column(String(10), index=True)
+    logger: Mapped[str] = mapped_column(String(100))
+    message: Mapped[str] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text, default=None)  # traceback

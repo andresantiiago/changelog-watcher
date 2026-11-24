@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 import httpx
@@ -14,12 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from . import prometheus as prom
-from .analysis import compute_statuses, load_environments, summarize
+from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
-from .models import Deployment, Project, Release, Snapshot, utcnow
+from .models import SNAPSHOT_FIELDS, Deployment, Project, Release, Snapshot, utcnow
 from .sources import SourceError, fetch_releases
-from .versioning import parse_version
 
 log = logging.getLogger(__name__)
 
@@ -46,19 +45,8 @@ class RefreshState:
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
-            "running": self.running,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
-            "duration_seconds": self.duration_seconds,
-            "success": self.success,
-            "projects_ok": self.projects_ok,
-            "projects_failed": self.projects_failed,
-            "detections_ok": self.detections_ok,
-            "detections_failed": self.detections_failed,
-            "new_releases": self.new_releases,
-            "errors": self.errors[-50:],
-        }
+        out = {k: v.isoformat() if isinstance(v, datetime) else v for k, v in asdict(self).items()}
+        return out | {"errors": self.errors[-50:]}
 
 
 STATE = RefreshState()
@@ -70,26 +58,31 @@ async def refresh_project_releases(project_id: int, client: httpx.AsyncClient) -
     settings = get_settings()
     with session_scope() as s:
         project = s.get(Project, project_id)
+        if project is None:  # deleted while the refresh was running
+            return 0
         known = {r.tag: r.published_at for r in project.releases}
         hints = [d.current_version for d in project.deployments if d.current_version]
         s.expunge(project)
     try:
         data = await fetch_releases(project, client, settings, known_dates=known, hints=hints)
-    except (SourceError, httpx.HTTPError) as exc:
+    except Exception as exc:  # anything (bad JSON, unexpected payload...) must show up as the project's error
         SOURCE_FETCH.labels(project.source_type, "error").inc()
         with session_scope() as s:
             p = s.get(Project, project_id)
-            p.last_error = str(exc) or exc.__class__.__name__
-            p.last_checked_at = utcnow()
+            if p is not None:
+                p.last_error = str(exc) or exc.__class__.__name__
+                p.last_checked_at = utcnow()
         raise SourceError(f"{project.name}: {exc}") from exc
 
     SOURCE_FETCH.labels(project.source_type, "ok").inc()
     new = 0
     with session_scope() as s:
         p = s.get(Project, project_id)
+        if p is None:
+            return 0
         existing = {r.tag: r for r in s.scalars(select(Release).where(Release.project_id == project_id))}
         for item in data:
-            parsed = parse_version(item.tag, p.tag_pattern, two_part=p.version_scheme == "major_patch")
+            parsed = pv(p, item.tag, use_pattern=True)
             rel = existing.get(item.tag)
             if rel is None:
                 rel = Release(project_id=project_id, tag=item.tag)
@@ -156,6 +149,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
                 dep.detection_error = err
                 failed += 1
                 errors.append(f"{names[dep_id]}: {err}")
+                log.warning("detecção falhou: %s: %s", names[dep_id], err)
                 DETECTIONS.labels(env_names[dep_id], "error").inc()
     return ok, failed, errors
 
@@ -170,18 +164,9 @@ def store_snapshots() -> None:
             if snap is None:
                 snap = Snapshot(environment_id=env.id, day=today)
                 s.add(snap)
-            c = summary["counts"]
-            snap.total = summary["total"]
-            snap.up_to_date = c["up_to_date"]
-            snap.patch = c["patch"]
-            snap.minor = c["minor"]
-            snap.major = c["major"]
-            snap.unknown = c["unknown"]
-            snap.up_to_date_ratio = summary["up_to_date_ratio"]
-            snap.libyears = summary["libyears"]
-            snap.avg_outdated_days = summary["avg_outdated_days"]
-            snap.max_outdated_days = summary["max_outdated_days"]
-            snap.versions_behind = summary["versions_behind"]
+            values = summary | summary["counts"]
+            for key in SNAPSHOT_FIELDS:
+                setattr(snap, key, values[key])
             snap.updated_at = utcnow()
 
 
@@ -230,6 +215,7 @@ async def run_refresh(project_ids: list[int] | None = None, fetch: bool = True, 
                     await asyncio.gather(*(one(pid) for pid in ids))
             store_snapshots()
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
+            log.info("atualização concluída: %s projeto(s) ok, %s com erro, %s novas versões", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
             REFRESH_TOTAL.labels("ok" if STATE.success else "partial").inc()
         except Exception as exc:
             log.exception("refresh failed")
