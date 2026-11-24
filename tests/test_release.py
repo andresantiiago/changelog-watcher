@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -57,39 +58,105 @@ def files(tmp_path, monkeypatch):
     monkeypatch.setattr(rv, "PYPROJECT", py)
     monkeypatch.setattr(rv, "CHART", chart)
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
-    monkeypatch.delenv("AI_FILE", raising=False)
+    monkeypatch.delenv("AI_DIR", raising=False)
     return py, chart
 
 
-def test_sync_files_python_without_v(files):
+def test_sync_files_only_touches_each_component(files):
     py, chart = files
-    assert rv.sync_files("v0.2.0") is True
+    assert rv.sync_files("v0.2.0") is True  # imagem: pyproject (sem v) + appVersion
     assert 'version = "0.2.0"' in py.read_text() and 'version = "keep"' in py.read_text()
-    assert chart.read_text() == 'apiVersion: v2\nversion: v0.2.0\nappVersion: "v0.2.0"\n'
+    assert chart.read_text() == 'apiVersion: v2\nversion: v0.1.0-rc1\nappVersion: "v0.2.0"\n'
     assert rv.sync_files("v0.2.0") is False
+    assert rv.sync_files(chart_version="v0.1.1") is True  # chart: só version
+    assert chart.read_text() == 'apiVersion: v2\nversion: v0.1.1\nappVersion: "v0.2.0"\n'
+    assert 'version = "0.2.0"' in py.read_text()
 
 
 def test_rc_tag_mode(files, capsys):
     py, chart = files
     rv.main(["v0.2.0-rc1"])
     out = capsys.readouterr().out
-    assert "version=v0.2.0-rc1\n" in out and "prerelease=true" in out
+    assert "app_version=v0.2.0-rc1\n" in out and "chart_tag=\n" in out and "prerelease=true" in out
     assert 'version = "0.2.0rc1"' in py.read_text()
-    assert chart.read_text() == 'apiVersion: v2\nversion: v0.2.0-rc1\nappVersion: "v0.2.0-rc1"\n'
+    assert chart.read_text() == 'apiVersion: v2\nversion: v0.1.0-rc1\nappVersion: "v0.2.0-rc1"\n'
     for bad in ("v0.2.0", "0.2.0-rc1"):
         with pytest.raises(SystemExit):
             rv.main([bad])
 
 
 def test_notes_from_copilot_go_to_output(files, tmp_path, monkeypatch):
-    ai = tmp_path / "copilot.txt"
-    ai.write_text("minor\n- Adiciona release automática\n")
+    (tmp_path / "copilot-app.txt").write_text("minor\n- Adiciona release automática\n")
     gh = tmp_path / "out"
-    monkeypatch.setenv("AI_FILE", str(ai))
+    monkeypatch.setenv("AI_DIR", str(tmp_path))
     monkeypatch.setenv("GITHUB_OUTPUT", str(gh))
     rv.main(["v0.2.0-rc1"])
     out = gh.read_text()
-    assert "notes<<EOF_" in out and "- Adiciona release automática\nEOF_" in out
+    assert "app_notes<<EOF_" in out and "- Adiciona release automática\nEOF_" in out
+
+
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    """Repositório git com imagem, chart e docs, já na tag combinada v0.2.0 (antes da separação)."""
+    def git(*args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+                       cwd=tmp_path, check=True, capture_output=True)
+
+    def commit(path, text, msg):
+        f = tmp_path / path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+        git("add", "-A")
+        git("commit", "-qm", msg)
+
+    py, chart = tmp_path / "pyproject.toml", tmp_path / "deploy/helm/changelog-watcher/Chart.yaml"
+    git("init", "-q")
+    commit("README.md", "x", "init")
+    chart.parent.mkdir(parents=True)
+    chart.write_text('version: v0.2.0\nappVersion: "v0.2.0"\n')
+    commit("pyproject.toml", 'version = "0.2.0"\n', "versões")
+    commit("changelog_watcher/app.py", "a", "app")
+    git("tag", "v0.2.0")
+    for name, value in {"ROOT": tmp_path, "PYPROJECT": py, "CHART": chart}.items():
+        monkeypatch.setattr(rv, name, value)
+    monkeypatch.delenv("AI_DIR", raising=False)
+    return commit, git
+
+
+def test_docs_only_generates_no_version(repo):
+    commit, _ = repo
+    commit("README.md", "docs", "docs: explica X")
+    commit("tests/test_x.py", "t", "test: cobre X")
+    assert rv.plan() == {"app_version": "", "chart_version": "", "app_notes": "", "chart_notes": ""}
+    assert rv.write_changes(str(rv.ROOT)) is False
+
+
+def test_chart_only_bumps_only_the_chart(repo):
+    commit, _ = repo
+    commit("README.md", "docs", "docs: explica X")
+    commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "feat(helm): networkpolicy")
+    p = rv.plan()
+    assert (p["app_version"], p["chart_version"]) == ("", "v0.3.0")  # parte da tag combinada v0.2.0
+    assert rv.write_changes(str(rv.ROOT)) is True
+    changes = (rv.ROOT / "changes-chart.txt").read_text()
+    assert "chart Helm" in changes and "docs: explica X" in changes  # docs entram nas notas
+    assert not (rv.ROOT / "changes-app.txt").exists()
+
+
+def test_image_change_bumps_image_and_chart_patch(repo, tmp_path, monkeypatch):
+    commit, git = repo
+    commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "fix(helm): x")
+    git("tag", "chart-v0.2.1")
+    commit("changelog_watcher/app.py", "b", "feat: nova fonte")
+    (tmp_path / "copilot-app.txt").write_text("minor\n- Adiciona fonte\n")
+    monkeypatch.setenv("AI_DIR", str(tmp_path))
+    p = rv.plan()
+    assert (p["app_version"], p["chart_version"]) == ("v0.3.0", "v0.2.2")  # chart sem mudanças: patch
+    assert p["app_notes"] == "- Adiciona fonte"
+    assert p["chart_notes"] == "- Atualiza a imagem padrão (appVersion) para v0.3.0"
+    rv.main([])
+    assert rv.CHART.read_text() == 'version: v0.2.2\nappVersion: "v0.3.0"\n'
+    assert rv.PYPROJECT.read_text() == 'version = "0.3.0"\n'
 
 
 _s = importlib.util.spec_from_file_location("test_summary", Path(__file__).parents[1] / ".github/scripts/test_summary.py")
