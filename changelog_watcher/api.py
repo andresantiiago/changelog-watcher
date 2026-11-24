@@ -27,7 +27,19 @@ from .analysis import (
 )
 from .config import SECRET_MASK, get_settings, mask_secret
 from .db import get_db
-from .models import AppSetting, Deployment, Environment, LogEntry, Project, Release, Report, Snapshot, Webhook, utcnow
+from .models import (
+    SNAPSHOT_FIELDS,
+    AppSetting,
+    Deployment,
+    Environment,
+    LogEntry,
+    Project,
+    Release,
+    Report,
+    Snapshot,
+    Webhook,
+    utcnow,
+)
 from .refresh import STATE, run_refresh
 from .report import create_report
 from apscheduler.triggers.cron import CronTrigger
@@ -35,6 +47,7 @@ from pydantic import BaseModel, Field
 
 from .scheduler import effective_schedule, next_runs, reschedule
 from .schemas import (
+    DETECTION_MODES,
     EnvironmentIn,
     EnvironmentOut,
     ProjectIn,
@@ -45,7 +58,7 @@ from .schemas import (
     WebhookOut,
 )
 from .sources import SOURCE_TYPES
-from .webhooks import WEBHOOK_KINDS, deliver_report, send_webhook
+from .webhooks import WEBHOOK_KINDS, deliver_report, record_status, send_webhook
 
 router = APIRouter(prefix="/api")
 _background: set[asyncio.Task] = set()
@@ -80,13 +93,7 @@ def meta():
     return {
         "source_types": SOURCE_TYPES,
         "webhook_kinds": WEBHOOK_KINDS,
-        "detection_modes": {
-            "none": "Sem detecção (versão manual)",
-            "workload": "Workload (Deployment/StatefulSet/DaemonSet)",
-            "helm": "Release Helm (todos os workloads do release)",
-            "image": "Padrão de imagem",
-            "query": "Consulta PromQL personalizada",
-        },
+        "detection_modes": DETECTION_MODES,
         "age_buckets": [b[0] for b in AGE_BUCKETS],
         "schedule": {
             "refresh_interval_minutes": sch["refresh_interval_minutes"],
@@ -107,11 +114,14 @@ def _env_out(env: Environment) -> dict:
     return data
 
 
-def _apply_env(env: Environment, body: EnvironmentIn) -> None:
+def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...]) -> None:
     for key, value in body.model_dump().items():
-        if key in ("prometheus_token", "prometheus_password") and value == SECRET_MASK:
+        if key in secrets and value == SECRET_MASK:
             continue  # unchanged secret
-        setattr(env, key, value)
+        setattr(obj, key, value)
+
+
+ENV_SECRETS = ("prometheus_token", "prometheus_password")
 
 
 @router.get("/environments")
@@ -122,7 +132,7 @@ def list_environments(db: Session = Depends(get_db)):
 @router.post("/environments", status_code=201)
 def create_environment(body: EnvironmentIn, db: Session = Depends(get_db)):
     env = Environment()
-    _apply_env(env, body)
+    _apply_body(env, body, ENV_SECRETS)
     db.add(env)
     _commit(db)
     return _env_out(env)
@@ -131,7 +141,7 @@ def create_environment(body: EnvironmentIn, db: Session = Depends(get_db)):
 @router.put("/environments/{env_id}")
 def update_environment(env_id: int, body: EnvironmentIn, db: Session = Depends(get_db)):
     env = _get(db, Environment, env_id)
-    _apply_env(env, body)
+    _apply_body(env, body, ENV_SECRETS)
     _commit(db)
     return _env_out(env)
 
@@ -321,7 +331,7 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
         "environments": summaries_by_environment(statuses, envs),
         "most_outdated": [s.to_dict() for s in most_outdated],
         "drift_pairs": drift_pairs(statuses, envs),
-        "drift_count": sum(1 for r in version_matrix(statuses, envs) if r["drift"]),
+        "drift_count": sum(1 for r in version_matrix(statuses) if r["drift"]),
         "projects": counts_projects,
         "refresh": STATE.to_dict(),
     }
@@ -333,23 +343,18 @@ def history(days: int = 90, environment_id: list[int] | None = Query(None), db: 
     stmt = select(Snapshot, Environment.name).join(Environment).where(Snapshot.day >= since)
     if environment_id:
         stmt = stmt.where(Snapshot.environment_id.in_(environment_id))
-    out = []
-    for snap, env_name in db.execute(stmt.order_by(Snapshot.day)):
-        out.append({
-            "environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
-            "total": snap.total, "up_to_date": snap.up_to_date, "patch": snap.patch, "minor": snap.minor,
-            "major": snap.major, "unknown": snap.unknown, "up_to_date_ratio": snap.up_to_date_ratio,
-            "libyears": snap.libyears, "avg_outdated_days": snap.avg_outdated_days,
-            "max_outdated_days": snap.max_outdated_days, "versions_behind": snap.versions_behind,
-        })
-    return out
+    return [
+        {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
+         **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
+        for snap, env_name in db.execute(stmt.order_by(Snapshot.day))
+    ]
 
 
 @router.get("/matrix")
 def matrix(db: Session = Depends(get_db)):
     envs = load_environments(db)
     statuses = compute_statuses(db)
-    return {"environments": [{"id": e.id, "name": e.name} for e in envs], "rows": version_matrix(statuses, envs)}
+    return {"environments": [{"id": e.id, "name": e.name} for e in envs], "rows": version_matrix(statuses)}
 
 
 @router.get("/compare")
@@ -448,13 +453,6 @@ def _hook_out(w: Webhook) -> dict:
     return data
 
 
-def _apply_hook(w: Webhook, body: WebhookIn) -> None:
-    for key, value in body.model_dump().items():
-        if key == "url" and value == SECRET_MASK:
-            continue
-        setattr(w, key, value)
-
-
 @router.get("/webhooks")
 def list_webhooks(db: Session = Depends(get_db)):
     return [_hook_out(w) for w in db.scalars(select(Webhook).order_by(Webhook.name))]
@@ -465,7 +463,7 @@ def create_webhook(body: WebhookIn, db: Session = Depends(get_db)):
     if body.url == SECRET_MASK:
         raise HTTPException(422, "informe a URL")
     w = Webhook()
-    _apply_hook(w, body)
+    _apply_body(w, body, ("url",))
     db.add(w)
     _commit(db)
     return _hook_out(w)
@@ -474,7 +472,7 @@ def create_webhook(body: WebhookIn, db: Session = Depends(get_db)):
 @router.put("/webhooks/{hook_id}")
 def update_webhook(hook_id: int, body: WebhookIn, db: Session = Depends(get_db)):
     w = _get(db, Webhook, hook_id)
-    _apply_hook(w, body)
+    _apply_body(w, body, ("url",))
     _commit(db)
     return _hook_out(w)
 
@@ -492,8 +490,7 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
     w = _get(db, Webhook, hook_id)
     data = build_report_data(db)
     result = await send_webhook(w, data, render_markdown(data))
-    w.last_sent_at = utcnow()
-    w.last_status = ("OK" if result["ok"] else "ERRO") + f": {result.get('detail', '')} (teste)"
+    record_status(w, result, " (teste)")
     return result
 
 

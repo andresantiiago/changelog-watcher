@@ -154,6 +154,11 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
             await client.aclose()
 
 
+def record_status(webhook: Webhook, result: dict, suffix: str = "") -> None:
+    webhook.last_sent_at = utcnow()
+    webhook.last_status = ("OK" if result["ok"] else "ERRO") + f": {result.get('detail', '')}{suffix}"
+
+
 async def deliver_report(session, report: Report, webhooks: list[Webhook]) -> list[dict]:
     results = []
     async with httpx.AsyncClient(timeout=get_settings().http_timeout) as client:
@@ -162,8 +167,7 @@ async def deliver_report(session, report: Report, webhooks: list[Webhook]) -> li
                 continue
             result = await send_webhook(wh, report.data, report.markdown, client)
             result["sent_at"] = datetime.now(timezone.utc).isoformat()
-            wh.last_sent_at = utcnow()
-            wh.last_status = ("OK" if result["ok"] else "ERRO") + f": {result.get('detail', '')}"
+            record_status(wh, result)
             results.append(result)
             if not result["ok"]:
                 log.warning("webhook %s failed: %s", wh.name, result.get("detail"))

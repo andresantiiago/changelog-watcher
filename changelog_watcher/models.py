@@ -161,6 +161,11 @@ class Snapshot(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+# Summary metrics stored per snapshot (the keys of analysis.summarize / its "counts").
+SNAPSHOT_FIELDS = ("total", "up_to_date", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
+                   "avg_outdated_days", "max_outdated_days", "versions_behind")
+
+
 class Webhook(Base):
     __tablename__ = "webhooks"
 

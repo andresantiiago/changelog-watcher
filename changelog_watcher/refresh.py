@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 import httpx
@@ -14,12 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from . import prometheus as prom
-from .analysis import compute_statuses, load_environments, summarize
+from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
-from .models import Deployment, Project, Release, Snapshot, utcnow
+from .models import SNAPSHOT_FIELDS, Deployment, Project, Release, Snapshot, utcnow
 from .sources import SourceError, fetch_releases
-from .versioning import parse_version
 
 log = logging.getLogger(__name__)
 
@@ -46,19 +45,8 @@ class RefreshState:
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
-            "running": self.running,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
-            "duration_seconds": self.duration_seconds,
-            "success": self.success,
-            "projects_ok": self.projects_ok,
-            "projects_failed": self.projects_failed,
-            "detections_ok": self.detections_ok,
-            "detections_failed": self.detections_failed,
-            "new_releases": self.new_releases,
-            "errors": self.errors[-50:],
-        }
+        out = {k: v.isoformat() if isinstance(v, datetime) else v for k, v in asdict(self).items()}
+        return out | {"errors": self.errors[-50:]}
 
 
 STATE = RefreshState()
@@ -94,7 +82,7 @@ async def refresh_project_releases(project_id: int, client: httpx.AsyncClient) -
             return 0
         existing = {r.tag: r for r in s.scalars(select(Release).where(Release.project_id == project_id))}
         for item in data:
-            parsed = parse_version(item.tag, p.tag_pattern, two_part=p.version_scheme == "major_patch")
+            parsed = pv(p, item.tag, use_pattern=True)
             rel = existing.get(item.tag)
             if rel is None:
                 rel = Release(project_id=project_id, tag=item.tag)
@@ -176,18 +164,9 @@ def store_snapshots() -> None:
             if snap is None:
                 snap = Snapshot(environment_id=env.id, day=today)
                 s.add(snap)
-            c = summary["counts"]
-            snap.total = summary["total"]
-            snap.up_to_date = c["up_to_date"]
-            snap.patch = c["patch"]
-            snap.minor = c["minor"]
-            snap.major = c["major"]
-            snap.unknown = c["unknown"]
-            snap.up_to_date_ratio = summary["up_to_date_ratio"]
-            snap.libyears = summary["libyears"]
-            snap.avg_outdated_days = summary["avg_outdated_days"]
-            snap.max_outdated_days = summary["max_outdated_days"]
-            snap.versions_behind = summary["versions_behind"]
+            values = summary | summary["counts"]
+            for key in SNAPSHOT_FIELDS:
+                setattr(snap, key, values[key])
             snap.updated_at = utcnow()
 
 
