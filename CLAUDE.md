@@ -20,7 +20,12 @@ helm lint deploy/helm/changelog-watcher
 
 Local kind cluster with a locally built image: see `deploy/helm/values-kind.yaml` (header has the docker build / `kind load` / helm steps) and the README section "Cluster kind local".
 
-CI (`.github/workflows/ci.yaml`, on PRs and called by `release.yaml`) runs pytest (JUnit XML rendered by `.github/scripts/test_summary.py` to the job summary and a sticky PR comment), regenerates the dashboard and fails on `git diff --exit-code deploy/`, then `helm lint` + `helm template` with all optional features enabled. `.github/workflows/release.yaml` runs on push to `main` (and `v*-rc*` tags): it calls `ci.yaml`, then the `version` → `image` → `release` jobs: Copilot CLI (auth via the `GH_TOKEN` secret) classifies the changes major/minor/patch and writes the release notes using the prompt in the workflow; `.github/scripts/release_version.py` picks the version (max of pyproject/Chart versions and `vX.Y.Z-rcN` tags, `-rcN` stripped, if above the last final tag; else bump by Copilot's answer, falling back to commit-message rules), commits a sync of `pyproject.toml` + `Chart.yaml` if needed, then tags, pushes the image to GHCR and creates the GitHub release. Pushing a `vX.Y.Z-rcN` tag publishes only that image tag + a GitHub pre-release, no commit. Version format: `vX.Y.Z[-rcN]` for chart, tags, image and release; `pyproject.toml` stays PEP 440 without `v` (`X.Y.Z`, `X.Y.ZrcN`) and `__version__` reads it from package metadata. Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`; edit `build_dashboard.py` and rerun it.
+## CI / releases
+
+- **`.github/workflows/ci.yaml`** (every PR, and called by `release.yaml`): pytest (JUnit XML rendered by `.github/scripts/test_summary.py` to the job summary and a sticky PR comment), regenerates the dashboard and fails on `git diff --exit-code deploy/`, then `helm lint` + `helm template` with all optional features enabled.
+- **`.github/workflows/release.yaml`** (push to `main` and `v*-rc*` tags): calls `ci.yaml`, then `version` → `image` → `release`. Copilot CLI (auth via the `GH_TOKEN` secret, prompt inline in the workflow) classifies the changes major/minor/patch and writes the release notes. `.github/scripts/release_version.py` picks the version: max of pyproject/Chart versions and `vX.Y.Z-rcN` tags (`-rcN` stripped) if above the last final tag, else bump by Copilot's answer, falling back to commit-message rules. It commits a sync of `pyproject.toml` + `Chart.yaml` if needed (`[skip ci]`), then tags, pushes the image to GHCR and creates the GitHub release. A `vX.Y.Z-rcN` tag publishes only that image tag + a GitHub pre-release, no commit.
+- **Version format**: `vX.Y.Z[-rcN]` for chart, tags, image and release; `pyproject.toml` stays PEP 440 without `v` (`X.Y.Z`, `X.Y.ZrcN`) and `__version__` reads it from package metadata.
+- Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`; edit `build_dashboard.py` and rerun it.
 
 ## Architecture
 
@@ -38,6 +43,7 @@ Key conventions:
 - **Secrets**: fields like Prometheus tokens/passwords and webhook URLs may hold `${VAR}` placeholders, expanded only at use time with `config.expand_env`. The API masks them with `mask_secret`, and an incoming `SECRET_MASK` value means "keep the existing value".
 - **DB / migrations**: SQLAlchemy 2.0 models in `models.py`; `db.init_engine` does `create_all` plus `_add_missing_columns`, a forward-only migration that only adds columns. New columns must be nullable or have a scalar default; renames/removals are not supported. SQLite by default, PostgreSQL via `DATABASE_URL`.
 - **Seed** (`seed.py`): optional YAML (`CONFIG_FILE`) loaded at startup and by CLI commands. Accepted fields are derived from the Pydantic `*In` schemas in `schemas.py`, so a new schema field is automatically seedable. Only creates missing records unless `SEED_OVERWRITE=true`.
+- **Environment filters**: in `compute_statuses` (and its callers) `None` means all environments and `[]` means none; but `Webhook.environment_ids == []` means the webhook receives all environments. Don't mix the two.
 - **Settings** come from env vars only (`config.Settings.from_env`, `lru_cache`d `get_settings()`). When adding a setting, also document it in the README table and, if relevant, `deploy/helm/changelog-watcher/values.yaml`.
 
 ## Tests
@@ -47,3 +53,5 @@ Key conventions:
 `tests/test_deploy.py` couples code and deploy artifacts:
 - every `changelog_watcher_*` metric used in the Grafana dashboard must be exposed by `/metrics` (renaming/removing a metric means updating `build_dashboard.py`);
 - `config.example.yaml` must load with exact counts (`{"environments": 2, "projects": 6, "webhooks": 2}`), so update the assertion when changing the example.
+
+`tests/test_release.py` loads the CI scripts in `.github/scripts/` via importlib; changes to `release_version.py` or `test_summary.py` must keep it passing.
