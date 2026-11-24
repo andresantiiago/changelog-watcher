@@ -475,6 +475,8 @@ function updatesCell(s) {
 async function viewDashboard(view) {
   const q = `?${S.envFilter ? `environment_id=${S.envFilter}&` : ""}${S.nsFilter ? `namespace=${encodeURIComponent(S.nsFilter)}` : ""}`;
   const [d, hist] = await Promise.all([api(`/api/dashboard${q}`), api(`/api/history?days=180${S.envFilter ? `&environment_id=${S.envFilter}` : ""}`)]);
+  // Namespace chosen for another environment: the select can't show (or clear) it, so drop it and reload.
+  if (S.nsFilter && !d.namespaces.includes(S.nsFilter)) { S.nsFilter = ""; return viewDashboard(view); }
   const o = d.overall;
   const filter = envFilterBar((id) => { S.envFilter = id; route(); }, S.envFilter);
   if (!S.envs.length) {

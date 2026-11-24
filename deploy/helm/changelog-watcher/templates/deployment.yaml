@@ -1,5 +1,7 @@
 {{- $sqlite := and (not .Values.database.url) (not .Values.database.existingSecret) -}}
-{{- if and $sqlite (gt (int .Values.replicaCount) 1) }}
+{{- /* também database.url "sqlite:..." (o padrão é em memória): banco e agendador por pod */ -}}
+{{- $singleReplica := or $sqlite (hasPrefix "sqlite" .Values.database.url) -}}
+{{- if and $singleReplica (gt (int .Values.replicaCount) 1) }}
 {{- fail "SQLite suporta apenas replicaCount=1; configure database.url (PostgreSQL) para mais réplicas" }}
 {{- end }}
 apiVersion: apps/v1
@@ -9,7 +11,7 @@ metadata:
   labels: {{- include "cw.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
-  {{- if $sqlite }}
+  {{- if $singleReplica }}
   strategy:
     type: Recreate
   {{- end }}

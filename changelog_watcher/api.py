@@ -8,9 +8,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from . import logstore
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
+    _iso,
     changelog_between,
     compare_environments,
     compute_statuses,
@@ -383,7 +385,7 @@ def refresh_status():
 # ---------------------------------------------------------------- reports
 def _report_summary(r: Report) -> dict:
     return {
-        "id": r.id, "created_at": r.created_at.isoformat(), "trigger": r.trigger,
+        "id": r.id, "created_at": _iso(r.created_at), "trigger": r.trigger,
         "period_start": r.period_start.isoformat(), "period_end": r.period_end.isoformat(),
         "delivery": r.delivery,
         "new_releases": len(r.data.get("new_releases", [])),
@@ -529,14 +531,20 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
 
 # ------------------------------------------------------------------- logs
 @router.get("/logs")
-def list_logs(level: str | None = None, q: str | None = None, limit: int = Query(300, le=1000), db: Session = Depends(get_db)):
+def list_logs(level: str | None = None, q: str | None = None, limit: int = Query(300, le=1000)):
+    logstore.flush()  # records are written by a background thread
+    db = logstore.session()
+    if db is None:
+        return []
     stmt = select(LogEntry).order_by(LogEntry.id.desc()).limit(limit)
     if level:
         stmt = stmt.where(LogEntry.level == level.upper())
     if q:
         stmt = stmt.where(LogEntry.message.ilike(f"%{q}%"))
-    return [
-        {"id": e.id, "created_at": e.created_at.isoformat(), "level": e.level, "logger": e.logger,
-         "message": e.message, "detail": e.detail}
-        for e in db.scalars(stmt)
-    ]
+    with db:
+        return [
+            # _iso: SQLite returns naive datetimes; without the offset the browser reads UTC as local time
+            {"id": e.id, "created_at": _iso(e.created_at), "level": e.level, "logger": e.logger,
+             "message": e.message, "detail": e.detail}
+            for e in db.scalars(stmt)
+        ]

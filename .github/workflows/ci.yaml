@@ -58,3 +58,5 @@ jobs:
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/changelog-watcher
       - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true > /dev/null
+      - name: SQLite (padrão em memória) recusa mais de uma réplica
+        run: "! helm template ci deploy/helm/changelog-watcher --set replicaCount=2 > /dev/null 2>&1"

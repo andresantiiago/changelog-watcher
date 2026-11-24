@@ -21,30 +21,39 @@ _engine = None
 _SessionLocal: sessionmaker | None = None
 
 
-def init_engine(url: str | None = None):
-    global _engine, _SessionLocal
-    url = url or get_settings().database_url
+def is_memory(url: str) -> bool:
+    return url.startswith("sqlite") and (":memory:" in url or url in ("sqlite://", "sqlite:///"))
+
+
+def make_engine(url: str):
+    """A new engine for ``url``. For an in-memory URL that is a new, empty database."""
     kwargs: dict = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
         path = url.split("///", 1)[-1]
-        if path and path != ":memory:" and not url.startswith("sqlite:///:memory:"):
+        if path and not is_memory(url):
             directory = os.path.dirname(os.path.abspath(path))
             os.makedirs(directory, exist_ok=True)
-        if ":memory:" in url or url in ("sqlite://", "sqlite:///"):
+        if is_memory(url):
             from sqlalchemy.pool import StaticPool
 
             kwargs["poolclass"] = StaticPool
-    _engine = create_engine(url, **kwargs)
+    engine = create_engine(url, **kwargs)
     if url.startswith("sqlite"):
 
-        @event.listens_for(_engine, "connect")
+        @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_conn, _):  # pragma: no cover - trivial
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys=ON")
             cur.execute("PRAGMA journal_mode=WAL")
             cur.close()
 
+    return engine
+
+
+def init_engine(url: str | None = None):
+    global _engine, _SessionLocal
+    _engine = make_engine(url or get_settings().database_url)
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     from . import models  # noqa: F401  (register tables)
 

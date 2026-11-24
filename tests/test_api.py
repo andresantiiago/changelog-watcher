@@ -212,7 +212,7 @@ def test_settings_and_logs(client):
 
 
 def test_unknown_environment_filter_is_empty(client, seeded):
-    # compute_statuses treats [] as "all"; a filter matching nothing must not fall back to every environment
+    # a filter matching nothing must not fall back to every environment
     d = client.get("/api/dashboard?environment_id=999").json()
     assert d["overall"]["total"] == 0 and d["most_outdated"] == []
     r = client.post("/api/reports", json={"environment_ids": [999]}).json()
