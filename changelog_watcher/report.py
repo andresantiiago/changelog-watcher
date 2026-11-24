@@ -27,7 +27,7 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(days=days)
     environments = [e for e in load_environments(session) if not environment_ids or e.id in environment_ids]
-    statuses = compute_statuses(session, [e.id for e in environments] or None, now=now)
+    statuses = compute_statuses(session, [e.id for e in environments], now=now)
     summaries = summaries_by_environment(statuses, environments)
     releases = recent_releases(session, days=days, now=now)
     outdated = sorted(

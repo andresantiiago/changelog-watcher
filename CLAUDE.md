@@ -18,7 +18,9 @@ python deploy/grafana/build_dashboard.py                 # regenerate Grafana da
 helm lint deploy/helm/changelog-watcher
 ```
 
-CI (`.github/workflows/ci.yaml`) runs pytest, regenerates the dashboard and fails on `git diff --exit-code deploy/`, then `helm lint` + `helm template` with all optional features enabled. Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`; edit `build_dashboard.py` and rerun it.
+Local kind cluster with a locally built image: see `deploy/helm/values-kind.yaml` (header has the docker build / `kind load` / helm steps) and the README section "Cluster kind local".
+
+CI (`.github/workflows/ci.yaml`, on PRs and called by `release.yaml`) runs pytest (JUnit XML rendered by `.github/scripts/test_summary.py` to the job summary and a sticky PR comment), regenerates the dashboard and fails on `git diff --exit-code deploy/`, then `helm lint` + `helm template` with all optional features enabled. `.github/workflows/release.yaml` runs on push to `main` (and `v*-rc*` tags): it calls `ci.yaml`, then the `version` → `image` → `release` jobs: Copilot CLI (auth via the `GH_TOKEN` secret) classifies the changes major/minor/patch and writes the release notes using the prompt in the workflow; `.github/scripts/release_version.py` picks the version (max of pyproject/Chart versions and `vX.Y.Z-rcN` tags, `-rcN` stripped, if above the last final tag; else bump by Copilot's answer, falling back to commit-message rules), commits a sync of `pyproject.toml` + `Chart.yaml` if needed, then tags, pushes the image to GHCR and creates the GitHub release. Pushing a `vX.Y.Z-rcN` tag publishes only that image tag + a GitHub pre-release, no commit. Version format: `vX.Y.Z[-rcN]` for chart, tags, image and release; `pyproject.toml` stays PEP 440 without `v` (`X.Y.Z`, `X.Y.ZrcN`) and `__version__` reads it from package metadata. Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`; edit `build_dashboard.py` and rerun it.
 
 ## Architecture
 
@@ -28,6 +30,7 @@ Data flow:
 1. **Refresh** (`refresh.py:run_refresh`): first `detect_versions` (Prometheus queries via `prometheus.py`, for deployments with `version_source == "prometheus"`), then fetch releases per project (`sources.fetch_releases`, dispatching on `Project.source_type`), upsert `Release` rows, and finally `store_snapshots` (one `Snapshot` per environment per day, feeding the UI history charts). Detection runs first because deployed versions are passed as `hints` to some sources (Docker Hub). A module-level `asyncio.Lock` + `STATE` serializes runs; API endpoints trigger refreshes via `_spawn`.
 2. **Analysis** (`analysis.py`) is computed on demand from the DB, never stored: `compute_statuses` → `DeploymentStatus` per (project × environment) with latest bugfix/minor/major, status, outdated days, libyears. Dashboard, report, metrics and env comparison all build on this.
 3. **Outputs**: `report.py` (report data + Markdown, saved as `Report`), `webhooks.py` (per-kind payload formatting), `metrics.py` (`WatcherCollector`, a custom collector that computes gauges from the DB on each scrape, cached `METRICS_CACHE_SECONDS`). Process counters/histograms live in `refresh.py`.
+4. **App logs**: `logstore.py:DBLogHandler` persists INFO+ log records into the `LogEntry` table (capped at ~5000 rows) so the UI's Logs page can show them; it must never log from inside `emit`.
 
 Key conventions:
 - **Version parsing** goes through `versioning.parse_version(tag, tag_pattern, two_part=...)`; in `analysis.py` use the `pv(project, text)` wrapper so the project's `tag_pattern` and `version_scheme` (`major_patch` for e.g. PostgreSQL) are respected. `Deployment.current_version` resolves detected vs manual version.

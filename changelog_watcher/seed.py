@@ -88,7 +88,11 @@ def load_seed(session: Session, path: str, overwrite: bool = False) -> dict:
     hooks = {w.name: w for w in session.scalars(select(Webhook))}
     for item in doc.get("webhooks") or []:
         hook = hooks.get(item["name"])
-        env_ids = [envs[n].id for n in item.get("environments", []) if n in envs]
+        names = item.get("environments") or []
+        if unknown := [n for n in names if n not in envs]:
+            # empty environment_ids means "all": a typo here widens what the webhook receives
+            log.warning("webhook %s references unknown environments %s", item["name"], unknown)
+        env_ids = [envs[n].id for n in names if n in envs]
         if hook is None:
             hook = Webhook(name=item["name"], url=item["url"], environment_ids=env_ids)
             session.add(hook)
@@ -96,5 +100,6 @@ def load_seed(session: Session, path: str, overwrite: bool = False) -> dict:
             stats["webhooks"] += 1
         elif overwrite:
             _apply(hook, item, WEBHOOK_FIELDS)
-            hook.environment_ids = env_ids
+            if "environments" in item:  # keep the UI's filter when the file doesn't declare one
+                hook.environment_ids = env_ids
     return stats

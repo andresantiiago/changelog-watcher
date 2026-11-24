@@ -39,7 +39,8 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
         {**row, "environments": {k: v for k, v in row["environments"].items() if int(k) in ids}}
         for row in data["drift"]
     ]
-    out["drift"] = [r for r in out["drift"] if len({v["version"] for v in r["environments"].values()}) > 1]
+    out["drift"] = [r for r in out["drift"]
+                    if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1]
     out["drift_pairs"] = [p for p in data["drift_pairs"] if p["source"] in names and p["target"] in names]
     return out
 
@@ -146,7 +147,7 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
             if resp.status_code >= 300:
                 return {"webhook": webhook.name, "ok": False, "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
         return {"webhook": webhook.name, "ok": True, "detail": f"{len(payloads)} mensagem(ns) enviada(s)"}
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         return {"webhook": webhook.name, "ok": False, "detail": str(exc)}
     finally:
         if own:

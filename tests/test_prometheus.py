@@ -130,3 +130,15 @@ def test_discover_groups_by_helm_release():
     tools = groups["tools"]
     assert not tools["helm"] and tools["suggestion"]["detection_mode"] == "workload"
     assert tools["suggestion"]["workload_kind"] == "statefulset"
+
+
+@respx.mock
+def test_instant_query_non_json_is_prometheus_error():
+    respx.get("http://prom:9090/api/v1/query").mock(return_value=httpx.Response(200, text="<html>login</html>"))
+    env = Environment(name="prod", prometheus_url="http://prom:9090", prometheus_auth="none", prometheus_verify_tls=True)
+    try:
+        asyncio.run(prom.instant_query(env, "up"))
+    except prom.PrometheusError as exc:
+        assert "inválida" in str(exc)
+    else:
+        raise AssertionError("expected error")

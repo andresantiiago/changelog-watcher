@@ -61,7 +61,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     if settings.auth_username and settings.auth_password:
-        expected = (settings.auth_username, settings.auth_password)
+        # bytes: compare_digest raises TypeError on non-ASCII str
+        expected = (settings.auth_username.encode(), settings.auth_password.encode())
         open_paths = ("/healthz", "/readyz", "/metrics")
 
         @app.middleware("http")
@@ -71,9 +72,9 @@ def create_app() -> FastAPI:
             header = request.headers.get("authorization", "")
             if header.lower().startswith("basic "):
                 try:
-                    user, _, pwd = base64.b64decode(header[6:]).decode().partition(":")
+                    user, _, pwd = base64.b64decode(header[6:]).partition(b":")
                 except Exception:
-                    user = pwd = ""
+                    user = pwd = b""
                 if secrets.compare_digest(user, expected[0]) and secrets.compare_digest(pwd, expected[1]):
                     return await call_next(request)
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="changelog-watcher"'})

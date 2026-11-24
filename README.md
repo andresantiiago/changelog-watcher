@@ -369,3 +369,33 @@ python deploy/grafana/build_dashboard.py
 ```bash
 helm lint deploy/helm/changelog-watcher
 ```
+
+### Versionamento e releases
+
+Versões seguem `vX.Y.Z` (com `v`) no chart (`version`/`appVersion`), nas tags, na imagem e
+na release. O `pyproject.toml` segue o padrão do pip, sem `v` (`X.Y.Z`, rc como `X.Y.ZrcN`).
+
+Todo PR roda o workflow `ci` (testes, dashboard e Helm); o resultado de cada teste aparece no
+resumo da execução no GitHub Actions e num comentário no PR (atualizado a cada push). Cada merge na `main` roda o workflow `release`, que
+primeiro executa o `ci` e só então gera a release:
+
+1. o Copilot CLI lê as mudanças desde a última versão (commits, arquivos e diff) e responde
+   `major`, `minor` ou `patch` mais até 3 tópicos descrevendo o que mudou;
+2. a versão vem do `pyproject.toml`, do `Chart.yaml` ou de uma tag `vX.Y.Z-rcN` quando for
+   maior que a última tag `vX.Y.Z` (vale a maior). O sufixo `-rcN` é sempre removido: o merge
+   na `main` é a versão final (`v0.2.0-rc3` → `v0.2.0`). Senão a última tag é incrementada
+   pela classificação do Copilot (sem resposta válida, pelas mensagens de commit:
+   `BREAKING CHANGE`/`tipo!:`/`[major]` → major, `feat:`/`[minor]` → minor, o resto → patch);
+3. se o `pyproject.toml` ou o `Chart.yaml` ficaram desatualizados, o workflow faz o commit
+   corrigindo (`chore(release): vX.Y.Z [skip ci]`);
+4. cria a tag `vX.Y.Z`, publica `ghcr.io/andresantiiago/changelog-watcher` com as tags
+   `vX.Y.Z`, `vX.Y`, `latest` e `sha-<commit>`, e cria a release no GitHub com a descrição
+   do Copilot (ou notas automáticas, se ele falhar).
+
+Durante o desenvolvimento, criar uma tag `vX.Y.Z-rcN` (ex.: `git tag v0.2.0-rc1 && git push origin v0.2.0-rc1`)
+publica a imagem `vX.Y.Z-rcN` (sem mexer em `latest`) e uma pre-release no GitHub, sem
+commit na `main`. No merge seguinte a release sai como `vX.Y.Z`.
+
+O chart usa `appVersion` como tag da imagem, então cada versão do chart aponta para a
+imagem da mesma release. O workflow usa o secret `GH_TOKEN`: um token fine-grained com
+**Contents** (escrita, para o commit e a tag) e **Copilot Requests**.

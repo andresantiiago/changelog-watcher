@@ -198,7 +198,7 @@ def compute_statuses(
     for project in load_projects(session):
         versions = project_versions(project)
         for dep in project.deployments:
-            if environment_ids and dep.environment_id not in environment_ids:
+            if environment_ids is not None and dep.environment_id not in environment_ids:
                 continue
             out.append(deployment_status(project, dep, dep.environment, versions, now))
     return out

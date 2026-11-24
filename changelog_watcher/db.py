@@ -58,7 +58,7 @@ def _add_missing_columns(engine) -> None:
 
     New columns must be nullable or have a scalar default.
     """
-    from sqlalchemy import inspect, text
+    from sqlalchemy import inspect, literal, text
 
     insp = inspect(engine)
     with engine.begin() as conn:
@@ -69,9 +69,9 @@ def _add_missing_columns(engine) -> None:
                     continue
                 ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col.type.compile(engine.dialect)}'
                 default = col.default.arg if col.default is not None and col.default.is_scalar else None
-                if default is not None:
-                    literal = int(default) if isinstance(default, bool) else default
-                    ddl += f" DEFAULT {literal!r}" if isinstance(literal, str) else f" DEFAULT {literal}"
+                if default is not None:  # rendered per dialect: PostgreSQL rejects "BOOLEAN DEFAULT 1"
+                    sql = literal(default, col.type).compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
+                    ddl += f" DEFAULT {sql}"
                 conn.execute(text(ddl))
                 log.info("added column %s.%s", table.name, col.name)
 

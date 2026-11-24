@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
@@ -327,7 +327,7 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
 
 @router.get("/history")
 def history(days: int = 90, environment_id: list[int] | None = Query(None), db: Session = Depends(get_db)):
-    since = date.today() - timedelta(days=days)
+    since = utcnow().date() - timedelta(days=days)  # snapshots are keyed by UTC day
     stmt = select(Snapshot, Environment.name).join(Environment).where(Snapshot.day >= since)
     if environment_id:
         stmt = stmt.where(Snapshot.environment_id.in_(environment_id))
@@ -498,7 +498,8 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
 # --------------------------------------------------------------- settings
 class SettingsIn(BaseModel):
     report_cron: str = Field(min_length=1)
-    refresh_interval_minutes: int = Field(ge=0)
+    # upper bound: an overflowing interval is saved, then breaks the scheduler on every startup
+    refresh_interval_minutes: int = Field(ge=0, le=1_000_000)
 
 
 def _settings_out() -> dict:

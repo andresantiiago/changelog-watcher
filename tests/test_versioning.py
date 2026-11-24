@@ -72,3 +72,10 @@ def test_two_part_scheme():
     assert str(info.latest_major) == "18.0"
     assert info.latest_minor is None
     assert info.status == "major"
+
+
+def test_two_part_keeps_third_number():
+    v = lambda t: parse_version(t, two_part=True)  # noqa: E731
+    assert str(v("9.6.24")) == "9.6.24"
+    assert v("9.6.24") > v("9.6.23")
+    assert classify(v("9.6.23"), [v("9.6.24")]).status == "patch"

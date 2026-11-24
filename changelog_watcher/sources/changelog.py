@@ -53,9 +53,12 @@ def parse_changelog(text: str, tag_pattern: str | None = None) -> list[ReleaseDa
         if not version:
             continue
         date_match = _DATE.search(clean)
+        tag = _version_token(clean, version)
+        if tag_pattern and parse_version(tag, tag_pattern) != version:
+            tag = clean  # the analysis re-parses tags with tag_pattern: keep a tag it still matches
         out.append(
             ReleaseData(
-                tag=_version_token(clean, version),
+                tag=tag,
                 title=clean,
                 published_at=parse_datetime(date_match.group(1)) if date_match else None,
                 notes="\n".join(lines).strip(),
@@ -75,14 +78,16 @@ def _version_token(title: str, version) -> str:
     return m.group(0).rstrip(".") if m else str(version)
 
 
-async def fetch_changelog(project, client: httpx.AsyncClient, settings) -> list[ReleaseData]:
+async def fetch_changelog(project, client: httpx.AsyncClient, settings, use_pattern: bool = True) -> list[ReleaseData]:
+    """``use_pattern=False`` when the changelog only enriches another source:
+    ``tag_pattern`` then describes that source's tags, not the changelog headings."""
     from .github import fetch_file
 
     url = project.changelog_url or project.repository
     if not url.startswith("http"):
         raise SourceError("informe a URL do arquivo de changelog")
     text = await fetch_file(url, client, settings)
-    releases = parse_changelog(text, project.tag_pattern)
+    releases = parse_changelog(text, project.tag_pattern if use_pattern else None)
     if not releases:
         raise SourceError("nenhuma versão encontrada no changelog")
     for r in releases:

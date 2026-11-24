@@ -209,3 +209,58 @@ def test_settings_and_logs(client):
     logging.getLogger("changelog_watcher.test").warning("falha de teste")
     logs = client.get("/api/logs?level=warning&q=teste").json()
     assert logs and logs[0]["message"] == "falha de teste"
+
+
+def test_unknown_environment_filter_is_empty(client, seeded):
+    # compute_statuses treats [] as "all"; a filter matching nothing must not fall back to every environment
+    d = client.get("/api/dashboard?environment_id=999").json()
+    assert d["overall"]["total"] == 0 and d["most_outdated"] == []
+    r = client.post("/api/reports", json={"environment_ids": [999]}).json()
+    assert r["data"]["outdated"] == [] and r["data"]["summaries"] == []
+
+
+def test_webhook_secret_round_trip_and_test_endpoint(client, seeded):
+    with respx.mock(assert_all_called=False) as m:
+        m.route(host="testserver").pass_through()
+        route = m.post("https://hooks.test/secret").mock(return_value=httpx.Response(200))
+        hook = client.post("/api/webhooks", json={"name": "h", "url": "https://hooks.test/secret"}).json()
+        assert hook["url"] == "********"
+        upd = client.put(f"/api/webhooks/{hook['id']}", json={**hook, "only_outdated": False}).json()
+        assert upd["url"] == "********"
+        r = client.post(f"/api/webhooks/{hook['id']}/test").json()
+    assert r["ok"] and route.called  # the masked value did not overwrite the real URL
+    assert client.get("/api/webhooks").json()[0]["last_status"].startswith("OK")
+    assert client.post("/api/webhooks", json={"name": "x", "url": "********"}).status_code == 422
+
+
+def test_settings_interval_bound(client):
+    r = client.put("/api/settings", json={"report_cron": "0 8 * * fri", "refresh_interval_minutes": 10**13})
+    assert r.status_code == 422
+    assert client.get("/api/settings").json()["refresh_interval_minutes"] != 10**13
+
+
+def test_basic_auth_non_ascii(monkeypatch):
+    import base64
+
+    from fastapi.testclient import TestClient
+
+    from changelog_watcher.config import get_settings
+    from changelog_watcher.main import create_app
+
+    monkeypatch.setenv("AUTH_USERNAME", "admin")
+    monkeypatch.setenv("AUTH_PASSWORD", "sénha")
+    get_settings.cache_clear()
+    try:
+        c = TestClient(create_app())  # no lifespan: only the middleware is exercised
+    finally:
+        get_settings.cache_clear()
+
+    def basic(raw: bytes) -> dict:
+        return {"Authorization": "Basic " + base64.b64encode(raw).decode()}
+
+    assert c.get("/api/refresh/status").status_code == 401
+    assert c.get("/healthz").status_code == 200
+    assert c.get("/api/refresh/status", headers=basic("admin:sénha".encode())).status_code == 200
+    assert c.get("/api/refresh/status", headers=basic("admin:senha".encode())).status_code == 401
+    assert c.get("/api/refresh/status", headers=basic("ádmin:x".encode())).status_code == 401
+    assert c.get("/api/refresh/status", headers={"Authorization": "Basic !!!"}).status_code == 401

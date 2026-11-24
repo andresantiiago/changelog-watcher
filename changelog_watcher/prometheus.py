@@ -122,11 +122,16 @@ async def instant_query(environment, promql: str, timeout: float = 15.0) -> list
     try:
         async with httpx.AsyncClient(timeout=timeout, verify=kw["verify"], auth=kw["auth"]) as client:
             resp = await client.get(url, params={"query": promql}, headers=kw["headers"])
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         raise PrometheusError(f"falha ao consultar Prometheus: {exc}") from exc
     if resp.status_code >= 400:
         raise PrometheusError(f"Prometheus respondeu {resp.status_code}: {resp.text[:200]}")
-    body = resp.json()
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):  # e.g. an HTML login page answered with 200
+        raise PrometheusError(f"resposta inválida do Prometheus: {resp.text[:200]}")
     if body.get("status") != "success":
         raise PrometheusError(f"erro na consulta: {body.get('error')}")
     return body.get("data", {}).get("result", [])

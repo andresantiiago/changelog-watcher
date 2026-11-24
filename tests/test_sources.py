@@ -113,3 +113,63 @@ def test_webpage_versions():
     rels = asyncio.run(_run(p))
     assert [r.tag for r in rels] == ["Release v2.4.1", "Release v2.4.0"]
     assert rels[0].url == "https://app.example.com/releases"
+
+
+@respx.mock
+def test_helm_null_app_version_and_undated_entry():
+    import asyncio
+
+    respx.get("https://charts.example.com/index.yaml").mock(return_value=httpx.Response(200, text="""
+entries:
+  app:
+    - version: 1.1.0
+      appVersion: 2.0.0
+    - version: 1.0.0
+      appVersion: 2.0.0
+      created: "2024-01-01T10:00:00Z"
+    - version: 0.9.0
+      appVersion: null
+"""))
+    p = _project(source_type="helm_index", repository="https://charts.example.com", chart_name="app",
+                 use_app_version=True)
+    rels = asyncio.run(_run(p))
+    assert [r.tag for r in rels] == ["2.0.0"]
+    assert rels[0].published_at.date().isoformat() == "2024-01-01"
+
+
+@respx.mock
+def test_dockerhub_hint_line_major_patch():
+    import asyncio
+
+    hub = "https://hub.docker.com/v2/repositories/library/postgres/tags"
+    respx.get(hub, params={"name": "12."}).mock(return_value=httpx.Response(200, json={"results": [
+        {"name": "12.22", "tag_last_pushed": "2024-11-01T00:00:00Z"}]}))
+    respx.get(hub).mock(return_value=httpx.Response(200, json={"results": [
+        {"name": "17.2", "tag_last_pushed": "2024-11-20T00:00:00Z"}, {"name": "latest"}]}))
+    p = _project(source_type="dockerhub", repository="postgres", version_scheme="major_patch")
+    async def go():
+        async with httpx.AsyncClient() as c:
+            return await fetch_releases(p, c, Settings(max_release_pages=1), hints=["12.5"])
+    assert sorted(r.tag for r in asyncio.run(go())) == ["12.22", "17.2"]
+
+
+def test_changelog_tags_match_tag_pattern():
+    from changelog_watcher.versioning import parse_version
+
+    pattern = r"^app (?P<version>\S+)"
+    rels = parse_changelog("## app 1.2.0 (2024-01-01)\n- x\n## lib 0.3.0\n- y\n## app 1.1.0\n", pattern)
+    assert [str(parse_version(r.tag, pattern)) for r in rels] == ["1.2.0", "1.1.0"]
+    assert rels[0].notes == "- x"  # the non-matching "lib" heading ends the section
+
+
+@respx.mock
+def test_webpage_with_tag_pattern_enriched_from_changelog():
+    import asyncio
+
+    respx.get("https://app.example.com/releases").mock(return_value=httpx.Response(200, text="<h2>Release v1.2.0</h2>"))
+    respx.get("https://app.example.com/CHANGELOG.md").mock(return_value=httpx.Response(200, text=CHANGELOG))
+    p = _project(source_type="webpage", repository="https://app.example.com/releases", tag_pattern=r"Release (v\S+)",
+                 changelog_url="https://app.example.com/CHANGELOG.md")
+    rels = asyncio.run(_run(p))
+    assert "feature X" in rels[0].notes
+    assert rels[0].published_at.date().isoformat() == "2024-05-01"

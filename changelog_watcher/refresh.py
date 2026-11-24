@@ -70,23 +70,28 @@ async def refresh_project_releases(project_id: int, client: httpx.AsyncClient) -
     settings = get_settings()
     with session_scope() as s:
         project = s.get(Project, project_id)
+        if project is None:  # deleted while the refresh was running
+            return 0
         known = {r.tag: r.published_at for r in project.releases}
         hints = [d.current_version for d in project.deployments if d.current_version]
         s.expunge(project)
     try:
         data = await fetch_releases(project, client, settings, known_dates=known, hints=hints)
-    except (SourceError, httpx.HTTPError) as exc:
+    except Exception as exc:  # anything (bad JSON, unexpected payload...) must show up as the project's error
         SOURCE_FETCH.labels(project.source_type, "error").inc()
         with session_scope() as s:
             p = s.get(Project, project_id)
-            p.last_error = str(exc) or exc.__class__.__name__
-            p.last_checked_at = utcnow()
+            if p is not None:
+                p.last_error = str(exc) or exc.__class__.__name__
+                p.last_checked_at = utcnow()
         raise SourceError(f"{project.name}: {exc}") from exc
 
     SOURCE_FETCH.labels(project.source_type, "ok").inc()
     new = 0
     with session_scope() as s:
         p = s.get(Project, project_id)
+        if p is None:
+            return 0
         existing = {r.tag: r for r in s.scalars(select(Release).where(Release.project_id == project_id))}
         for item in data:
             parsed = parse_version(item.tag, p.tag_pattern, two_part=p.version_scheme == "major_patch")

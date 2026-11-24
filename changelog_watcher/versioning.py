@@ -91,7 +91,8 @@ def parse_version(text: str | None, pattern: str | None = None, two_part: bool =
     v = _parse(text, pattern)
     if v is None or not two_part:
         return v
-    return Version(v.major, 0, v.minor, 0, v.pre, v.pre_num, v.raw, two_part=True)
+    # A third number (old PostgreSQL 9.6.24) is kept as build so distinct releases don't collapse.
+    return Version(v.major, 0, v.minor, v.patch, v.pre, v.pre_num, v.raw, two_part=True)
 
 
 def _parse(text: str | None, pattern: str | None) -> Version | None:

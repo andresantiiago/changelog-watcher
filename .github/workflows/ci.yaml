@@ -1,10 +1,10 @@
 name: ci
 
+# Testes de todo PR. O release.yaml reaproveita este workflow (workflow_call) antes de
+# publicar tag, imagem e release, então nada sai sem os testes passarem.
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -12,13 +12,40 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # comentário com o resumo dos testes no PR
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - name: Testes
+        run: pytest -v -rfE --junitxml=pytest.xml
+      - name: Resumo dos testes
+        if: always()
+        run: |
+          python3 .github/scripts/test_summary.py pytest.xml > summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Comentário no PR
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true  # PR de fork não tem permissão de escrita; não afeta o resultado
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          MARK="<!-- changelog-watcher:test-summary -->"
+          { echo "$MARK"; cat summary.md; echo; echo "Commit \`${SHA:0:7}\` · [execução]($RUN)"; } | head -c 65000 > comment.md
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARK\"))) | .id" | head -1)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$ID" -F body=@comment.md > /dev/null
+          else
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          fi
       - name: Dashboard em sincronia com o gerador
         run: |
           python deploy/grafana/build_dashboard.py
@@ -31,33 +58,3 @@ jobs:
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/changelog-watcher
       - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true > /dev/null
-
-  image:
-    needs: [test, helm]
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}

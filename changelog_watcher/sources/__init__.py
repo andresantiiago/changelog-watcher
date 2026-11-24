@@ -47,7 +47,7 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings, known_dat
     # Enrich missing notes from a CHANGELOG file when one is configured.
     if project.changelog_url and any(not r.notes for r in releases):
         try:
-            parsed = await changelog.fetch_changelog(project, client, settings)
+            parsed = await changelog.fetch_changelog(project, client, settings, use_pattern=False)
         except (SourceError, httpx.HTTPError):
             parsed = []
         by_version = {}
