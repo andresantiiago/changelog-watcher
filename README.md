@@ -437,7 +437,8 @@ primeiro executa o `ci` e só então, para cada componente que mudou desde a sua
    corrigindo (`chore(release): vX.Y.Z, chart-vX.Y.Z [skip ci]`);
 4. cria as tags; para a imagem publica `ghcr.io/andresantiiago/changelog-watcher` com as tags
    `vX.Y.Z`, `vX.Y`, `latest` e `sha-<commit>`; e cria as releases no GitHub com a descrição
-   do Copilot (ou notas automáticas, se ele falhar). A release do chart não é marcada como
+   do Copilot (ou os assuntos dos commits do componente desde a última tag dele, se o
+   Copilot falhar). A release do chart não é marcada como
    "Latest".
 
 Durante o desenvolvimento, criar uma tag `vX.Y.Z-rcN` (ex.: `git tag v0.2.0-rc1 && git push origin v0.2.0-rc1`)

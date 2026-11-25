@@ -49,7 +49,7 @@ jobs:
         run: python3 .github/scripts/release_version.py --changes
       - name: Classificação e notas (Copilot)
         if: steps.changes.outputs.any == 'true'
-        continue-on-error: true  # sem resposta: bump pelas mensagens de commit e notas automáticas
+        continue-on-error: true  # sem resposta: bump e notas pelas mensagens de commit
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
@@ -141,7 +141,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Roda mesmo sem imagem (só o chart mudou); não roda se a imagem falhou.
+  # Roda mesmo sem imagem (só o chart mudou); não roda se a imagem falhou. As notas vêm sempre
+  # do script (Copilot ou commits desde a tag do componente), não de --generate-notes.
   release:
     needs: [version, image]
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.image.result != 'failure' }}
@@ -157,13 +158,13 @@ jobs:
           NOTES: ${{ needs.version.outputs.app_notes }}
           PRE: ${{ needs.version.outputs.prerelease == 'true' && '--prerelease' || '' }}
         run: |
-          if [ -n "$NOTES" ]; then printf '%s\n' "$NOTES" > notes.md; NOTES_ARG="--notes-file notes.md"; else NOTES_ARG="--generate-notes"; fi
-          gh release create "$V" --repo "$REPO" --title "$V" --verify-tag $NOTES_ARG $PRE
+          printf '%s\n' "$NOTES" > notes.md
+          gh release create "$V" --repo "$REPO" --title "$V" --verify-tag --notes-file notes.md $PRE
       - name: Release do chart
         if: needs.version.outputs.chart_tag != ''
         env:
           V: ${{ needs.version.outputs.chart_tag }}
           NOTES: ${{ needs.version.outputs.chart_notes }}
         run: |  # --latest=false: "Latest" fica com a release da imagem
-          if [ -n "$NOTES" ]; then printf '%s\n' "$NOTES" > notes.md; NOTES_ARG="--notes-file notes.md"; else NOTES_ARG="--generate-notes"; fi
-          gh release create "$V" --repo "$REPO" --title "$V" --verify-tag --latest=false $NOTES_ARG
+          printf '%s\n' "$NOTES" > notes.md
+          gh release create "$V" --repo "$REPO" --title "$V" --verify-tag --latest=false --notes-file notes.md

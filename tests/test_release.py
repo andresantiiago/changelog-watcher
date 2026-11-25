@@ -120,6 +120,7 @@ def repo(tmp_path, monkeypatch):
     for name, value in {"ROOT": tmp_path, "PYPROJECT": py, "CHART": chart}.items():
         monkeypatch.setattr(rv, name, value)
     monkeypatch.delenv("AI_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)  # write_changes grava no diretório atual
     return commit, git
 
 
@@ -128,7 +129,7 @@ def test_docs_only_generates_no_version(repo):
     commit("README.md", "docs", "docs: explica X")
     commit("tests/test_x.py", "t", "test: cobre X")
     assert rv.plan() == {"app_version": "", "chart_version": "", "app_notes": "", "chart_notes": ""}
-    assert rv.write_changes(str(rv.ROOT)) is False
+    assert rv.write_changes() is False
 
 
 def test_chart_only_bumps_only_the_chart(repo):
@@ -137,10 +138,11 @@ def test_chart_only_bumps_only_the_chart(repo):
     commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "feat(helm): networkpolicy")
     p = rv.plan()
     assert (p["app_version"], p["chart_version"]) == ("", "v0.3.0")  # parte da tag combinada v0.2.0
-    assert rv.write_changes(str(rv.ROOT)) is True
+    assert rv.write_changes() is True
     changes = (rv.ROOT / "changes-chart.txt").read_text()
     assert "chart Helm" in changes and "docs: explica X" in changes  # docs entram nas notas
     assert not (rv.ROOT / "changes-app.txt").exists()
+    assert p["chart_notes"] == "- feat(helm): networkpolicy"  # sem Copilot: assuntos dos commits do chart
 
 
 def test_image_change_bumps_image_and_chart_patch(repo, tmp_path, monkeypatch):
