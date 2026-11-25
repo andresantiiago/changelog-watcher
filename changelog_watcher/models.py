@@ -23,6 +23,11 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def aware(dt: datetime | None) -> datetime | None:
+    """Naive datetimes (SQLite, date-only strings) are UTC."""
+    return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 class Environment(Base):
     __tablename__ = "environments"
 
@@ -102,7 +107,6 @@ class Release(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
     url: Mapped[str | None] = mapped_column(String(1000), default=None)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
-    commit_sha: Mapped[str | None] = mapped_column(String(64), default=None)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="releases")
@@ -201,14 +205,3 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
-
-
-class LogEntry(Base):
-    __tablename__ = "log_entries"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
-    level: Mapped[str] = mapped_column(String(10), index=True)
-    logger: Mapped[str] = mapped_column(String(100))
-    message: Mapped[str] = mapped_column(Text)
-    detail: Mapped[str | None] = mapped_column(Text, default=None)  # traceback

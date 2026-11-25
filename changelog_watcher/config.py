@@ -85,17 +85,9 @@ def expand_env(value: str | None) -> str | None:
     return _PLACEHOLDER.sub(lambda m: os.environ.get(m.group(1), m.group(2) or ""), value)
 
 
-def is_placeholder(value: str | None) -> bool:
-    return bool(value) and bool(_PLACEHOLDER.fullmatch(value.strip()))
-
-
 SECRET_MASK = "********"
 
 
 def mask_secret(value: str | None) -> str | None:
     """Hide secrets in API responses (placeholders are shown as-is)."""
-    if not value:
-        return value
-    if is_placeholder(value):
-        return value
-    return SECRET_MASK
+    return value if not value or _PLACEHOLDER.fullmatch(value.strip()) else SECRET_MASK

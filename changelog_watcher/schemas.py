@@ -136,6 +136,5 @@ class ReportRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     project_ids: list[int] | None = None
-    fetch: bool = True
     detect: bool = True
     wait: bool = False

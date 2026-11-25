@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from itertools import islice
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -33,7 +34,6 @@ from .models import (
     AppSetting,
     Deployment,
     Environment,
-    LogEntry,
     Project,
     Release,
     Report,
@@ -276,13 +276,6 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     return Response(status_code=204)
 
 
-@router.post("/projects/{project_id}/refresh")
-async def refresh_project(project_id: int, db: Session = Depends(get_db)):
-    _get(db, Project, project_id)
-    db.close()
-    return await run_refresh(project_ids=[project_id])
-
-
 @router.get("/projects/{project_id}/releases")
 def project_releases(project_id: int, limit: int = 100, db: Session = Depends(get_db)):
     project = _get(db, Project, project_id)
@@ -385,10 +378,10 @@ def releases_recent(days: int = 7, db: Session = Depends(get_db)):
 async def refresh(body: RefreshRequest | None = None):
     body = body or RefreshRequest()
     if body.wait:
-        return await run_refresh(body.project_ids, body.fetch, body.detect)
+        return await run_refresh(body.project_ids, detect=body.detect)
     if STATE.running:
         return {**STATE.to_dict(), "message": "atualização já em andamento"}
-    _spawn(run_refresh(body.project_ids, body.fetch, body.detect))
+    _spawn(run_refresh(body.project_ids, detect=body.detect))
     await asyncio.sleep(0)
     return {**STATE.to_dict(), "running": True, "message": "atualização iniciada"}
 
@@ -541,19 +534,6 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
 # ------------------------------------------------------------------- logs
 @router.get("/logs")
 def list_logs(level: str | None = None, q: str | None = None, limit: int = Query(300, le=1000)):
-    logstore.flush()  # records are written by a background thread
-    db = logstore.session()
-    if db is None:
-        return []
-    stmt = select(LogEntry).order_by(LogEntry.id.desc()).limit(limit)
-    if level:
-        stmt = stmt.where(LogEntry.level == level.upper())
-    if q:
-        stmt = stmt.where(LogEntry.message.ilike(f"%{q}%"))
-    with db:
-        return [
-            # _iso: SQLite returns naive datetimes; without the offset the browser reads UTC as local time
-            {"id": e.id, "created_at": _iso(e.created_at), "level": e.level, "logger": e.logger,
-             "message": e.message, "detail": e.detail}
-            for e in db.scalars(stmt)
-        ]
+    level, q = (level or "").upper(), (q or "").lower()
+    rows = reversed(logstore.RECORDS.copy())  # copy: other threads append while we iterate
+    return list(islice((e for e in rows if (not level or e["level"] == level) and q in e["message"].lower()), limit))

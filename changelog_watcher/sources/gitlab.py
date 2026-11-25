@@ -54,7 +54,6 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings) -> list[Relea
                 notes=release.get("description") or item.get("message") or "",
                 published_at=parse_datetime(commit.get("created_at") or commit.get("committed_date")),
                 url=f"{base}/{path}/-/tags/{item['name']}",
-                commit_sha=commit.get("id"),
             )
         )
     return out
