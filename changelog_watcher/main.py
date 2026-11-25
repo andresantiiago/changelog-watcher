@@ -6,6 +6,7 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -62,10 +63,24 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Changelog Watcher", version=__version__, lifespan=lifespan)
     settings = get_settings()
 
-    if settings.auth_username and settings.auth_password:
+    has_auth = bool(settings.auth_username and settings.auth_password)
+    if not has_auth and not settings.auth_disabled:
+        # Fail closed: an open API lets anyone reconfigure the app and reach internal hosts.
+        raise RuntimeError("defina AUTH_USERNAME e AUTH_PASSWORD (ou AUTH_DISABLED=true para rodar sem autenticação)")
+
+    @app.middleware("http")
+    async def same_origin(request: Request, call_next):
+        """CSRF: browsers resend Basic Auth credentials on cross-site form posts."""
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if origin and urlsplit(origin).netloc != request.headers.get("host"):
+                return JSONResponse({"detail": "requisição de outra origem bloqueada"}, status_code=403)
+        return await call_next(request)
+
+    if has_auth:
         # bytes: compare_digest raises TypeError on non-ASCII str
         expected = (settings.auth_username.encode(), settings.auth_password.encode())
-        open_paths = ("/healthz", "/readyz", "/metrics")
+        open_paths = ("/healthz", "/readyz", "/metrics")  # /metrics: METRICS_TOKEN, checked below
 
         @app.middleware("http")
         async def basic_auth(request: Request, call_next):
@@ -97,7 +112,11 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/metrics", include_in_schema=False)
-    def metrics():
+    def metrics(request: Request):
+        if settings.metrics_token:  # app/version inventory: a map of what is outdated
+            sent = request.headers.get("authorization", "").removeprefix("Bearer ").encode()
+            if not secrets.compare_digest(sent, settings.metrics_token.encode()):
+                return Response(status_code=401, headers={"WWW-Authenticate": "Bearer"})
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
     class _Revalidate(StaticFiles):  # SPA has no build hash: make browsers revalidate (ETag -> 304) so UI updates apply on reload

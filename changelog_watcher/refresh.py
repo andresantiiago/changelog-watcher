@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from . import prometheus as prom
+from . import safehttp
 from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
@@ -93,7 +94,8 @@ async def refresh_project_releases(project_id: int, client: httpx.AsyncClient) -
             rel.title = item.title or rel.title
             rel.prerelease = item.prerelease
             rel.published_at = item.published_at or rel.published_at
-            rel.url = item.url or rel.url
+            # only http(s): the UI renders it as a link (javascript: from a crafted Helm index, GitLab...)
+            rel.url = next((u for u in (item.url, rel.url) if u and u.lower().startswith(("https://", "http://"))), None)
             if item.notes:
                 rel.notes = item.notes
         p.last_error = None
@@ -193,7 +195,7 @@ async def run_refresh(project_ids: list[int] | None = None, detect: bool = True)
                     stmt = stmt.where(Project.id.in_(project_ids))
                 ids = list(s.scalars(stmt))
             sem = asyncio.Semaphore(6)
-            async with httpx.AsyncClient(
+            async with safehttp.client(
                 timeout=settings.http_timeout,
                 follow_redirects=True,
                 headers={"User-Agent": "changelog-watcher"},

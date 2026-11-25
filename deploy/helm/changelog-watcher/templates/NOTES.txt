@@ -14,6 +14,13 @@ Acesse localmente:
   abra http://localhost:8080
 {{- end }}
 
+{{- if not .Values.auth.enabled }}
+ATENÇÃO: autenticação desligada (auth.enabled=false): qualquer um que alcance o serviço pode alterar a configuração.
+{{- else if not (or .Values.auth.password .Values.auth.existingSecret) }}
+Usuário: {{ .Values.auth.username }} – senha gerada no Secret {{ include "cw.secretName" . }}:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "cw.secretName" . }} -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d
+{{- end }}
+
 {{- with .Values.networkPolicy.prometheus }}
 {{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
 ATENÇÃO: networkPolicy.prometheus está ligada sem allowIngressFrom: o Ingress não alcança o pod.

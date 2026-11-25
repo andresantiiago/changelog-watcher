@@ -1,0 +1,7 @@
+# trivy config: aceitos conscientemente
+# Sem limite de CPU de propósito (o refresh é curto e intermitente; throttling só o atrasaria).
+KSV-0011
+# Falso positivo: o namespace vem do `helm install -n`, não do template.
+KSV-0110
+# Falso positivo: a imagem é a do próprio projeto no ghcr.io.
+KSV-0125

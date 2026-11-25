@@ -21,8 +21,9 @@ def _path(project) -> str:
     return path
 
 
-def _headers(settings) -> dict:
-    return {"PRIVATE-TOKEN": settings.gitlab_token} if settings.gitlab_token else {}
+def _headers(settings, base: str) -> dict:
+    """Token only for the configured GitLab (GITLAB_URL), never a project's ``source_url``."""
+    return {"PRIVATE-TOKEN": settings.gitlab_token} if settings.gitlab_token and base == settings.gitlab_url else {}
 
 
 async def fetch_releases(project, client: httpx.AsyncClient, settings) -> list[ReleaseData]:
@@ -37,7 +38,7 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings) -> list[R
             url=((item.get("_links") or {}).get("self")) or f"{base}/{path}/-/releases/{item['tag_name']}",
             prerelease=bool(item.get("upcoming_release")),
         )
-        async for item in paged(client, url, settings, _headers(settings))
+        async for item in paged(client, url, settings, _headers(settings, base))
     ]
 
 
@@ -45,7 +46,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings) -> list[Relea
     base, path = _base(project, settings), _path(project)
     out: list[ReleaseData] = []
     async for item in paged(client, f"{base}/api/v4/projects/{quote(path, safe='')}/repository/tags", settings,
-                            _headers(settings)):
+                            _headers(settings, base)):
         commit = item.get("commit") or {}
         release = item.get("release") or {}
         out.append(

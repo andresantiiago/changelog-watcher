@@ -35,7 +35,7 @@ spec:
         {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
       annotations:
         checksum/seed: {{ dict "e" .Values.seed.environments "p" .Values.seed.projects "w" .Values.seed.webhooks | toJson | sha256sum }}
-        checksum/secret: {{ dict "s" .Values.secrets.values "a" .Values.auth | toJson | sha256sum }}
+        checksum/secret: {{ dict "s" .Values.secrets.values "a" .Values.auth "m" .Values.metrics.token | toJson | sha256sum }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
@@ -79,6 +79,10 @@ spec:
             {{- end }}
             - name: DATABASE_URL
               value: {{ ternary "sqlite:////data/changelog-watcher.db" "sqlite:///:memory:" $pvc | quote }}
+            {{- if not .Values.auth.enabled }}
+            - name: AUTH_DISABLED
+              value: "true"
+            {{- end }}
             {{- if and .Values.auth.enabled .Values.auth.existingSecret }}
             - name: AUTH_USERNAME
               valueFrom: {secretKeyRef: {name: {{ .Values.auth.existingSecret }}, key: AUTH_USERNAME}}

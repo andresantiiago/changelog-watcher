@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -10,9 +11,11 @@ from .base import ReleaseData, SourceError, get_json, paged, parse_datetime
 MAX_TAG_DATE_LOOKUPS = 25  # commits fetched to date unknown tags per run
 
 
-def _headers(settings, accept: str = "application/vnd.github+json") -> dict:
-    headers = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
-    if settings.github_token:
+def _headers(settings, api: str) -> dict:
+    """The token only goes to the API the operator configured (GITHUB_API_URL), never to a
+    project's ``source_url``: anyone editing a project could point it at their own host."""
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    if settings.github_token and api == settings.github_api_url:
         headers["Authorization"] = f"Bearer {settings.github_token}"
     return headers
 
@@ -43,7 +46,7 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings) -> list[R
             url=item.get("html_url"),
             prerelease=bool(item.get("prerelease")),
         )
-        async for item in paged(client, f"{api}/repos/{repo}/releases", settings, _headers(settings))
+        async for item in paged(client, f"{api}/repos/{repo}/releases", settings, _headers(settings, api))
         if not item.get("draft")
     ]
 
@@ -60,7 +63,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: 
             commit_sha=(item.get("commit") or {}).get("sha"),
             published_at=known_dates.get(item["name"]),
         )
-        async for item in paged(client, f"{api}/repos/{repo}/tags", settings, _headers(settings))
+        async for item in paged(client, f"{api}/repos/{repo}/tags", settings, _headers(settings, api))
     ]
 
     missing = [t for t in tags if t.published_at is None and t.commit_sha]
@@ -71,7 +74,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: 
     async def lookup(t: ReleaseData):
         async with sem:
             try:
-                resp = await get_json(client, f"{api}/repos/{repo}/commits/{t.commit_sha}", headers=_headers(settings))
+                resp = await get_json(client, f"{api}/repos/{repo}/commits/{t.commit_sha}", headers=_headers(settings, api))
                 commit = resp.json().get("commit", {})
                 t.published_at = parse_datetime(
                     (commit.get("committer") or {}).get("date") or (commit.get("author") or {}).get("date")
@@ -88,7 +91,8 @@ async def fetch_file(url: str, client: httpx.AsyncClient, settings) -> str:
     if "github.com/" in url and "/blob/" in url:
         url = url.replace("https://github.com/", "https://raw.githubusercontent.com/").replace("/blob/", "/", 1)
     headers = {}
-    if settings.github_token and ("githubusercontent.com" in url or "api.github.com" in url):
+    trusted = {"raw.githubusercontent.com", urlsplit(settings.github_api_url).hostname}
+    if settings.github_token and urlsplit(url).hostname in trusted:
         headers["Authorization"] = f"Bearer {settings.github_token}"
     resp = await get_json(client, url, headers=headers)
     return resp.text

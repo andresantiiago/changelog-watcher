@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+
+log = logging.getLogger(__name__)
 
 
 def _bool(value: str | None, default: bool = False) -> bool:
@@ -34,6 +37,8 @@ class Settings:
     public_url: str = ""
     auth_username: str | None = None
     auth_password: str | None = None
+    auth_disabled: bool = False
+    metrics_token: str | None = None
     scheduler_enabled: bool = True
     metrics_cache_seconds: int = 30
     log_level: str = "INFO"
@@ -60,6 +65,8 @@ class Settings:
             public_url=(e("PUBLIC_URL", "") or "").rstrip("/"),
             auth_username=e("AUTH_USERNAME") or None,
             auth_password=e("AUTH_PASSWORD") or None,
+            auth_disabled=_bool(e("AUTH_DISABLED"), False),
+            metrics_token=e("METRICS_TOKEN") or None,
             scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), cls.scheduler_enabled),
             metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS") or cls.metrics_cache_seconds),
             log_level=e("LOG_LEVEL") or cls.log_level,
@@ -74,15 +81,26 @@ def get_settings() -> Settings:
 _PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
-def expand_env(value: str | None) -> str | None:
-    """Expand ``${VAR}`` / ``${VAR:-default}`` placeholders using the environment.
+# The app's own credentials: a placeholder must never resolve to them, or anyone able to edit
+# an environment/webhook could send them to a host of their choice.
+_APP_SECRETS = frozenset({"AUTH_USERNAME", "AUTH_PASSWORD", "GITHUB_TOKEN", "GITLAB_TOKEN", "METRICS_TOKEN",
+                          "DATABASE_URL"})
 
-    Secrets (Prometheus tokens, webhook URLs) can therefore be stored as a
-    placeholder and injected from a Kubernetes Secret.
+
+def expand_env(value: str | None) -> str | None:
+    """Resolve a ``${VAR}`` / ``${VAR:-default}`` placeholder from the environment.
+
+    Secrets (Prometheus tokens, webhook URLs) can therefore be stored as a placeholder and
+    injected from a Kubernetes Secret. Only a value that is *entirely* a placeholder is
+    expanded: composing one into a URL (``https://attacker/?t=${X}``) would leak it.
     """
-    if value is None:
-        return None
-    return _PLACEHOLDER.sub(lambda m: os.environ.get(m.group(1), m.group(2) or ""), value)
+    m = _PLACEHOLDER.fullmatch((value or "").strip())
+    if not m:
+        return value
+    if m.group(1) in _APP_SECRETS:
+        log.warning("placeholder ${%s} não permitido (credencial da própria aplicação)", m.group(1))
+        return ""
+    return os.environ.get(m.group(1), m.group(2) or "")
 
 
 SECRET_MASK = "********"

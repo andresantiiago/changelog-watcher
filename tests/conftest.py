@@ -5,6 +5,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
 os.environ.setdefault("REFRESH_ON_STARTUP", "false")
 os.environ.setdefault("METRICS_CACHE_SECONDS", "0")
+os.environ.setdefault("AUTH_DISABLED", "true")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

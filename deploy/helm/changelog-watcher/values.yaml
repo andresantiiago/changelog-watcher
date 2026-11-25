@@ -21,6 +21,7 @@ podLabels: {}
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 10001
+  runAsGroup: 10001
   fsGroup: 10001
   seccompProfile:
     type: RuntimeDefault
@@ -103,9 +104,12 @@ secrets:
   #   PROM_PROD_TOKEN: xxx
   #   SLACK_WEBHOOK_URL: https://hooks.slack.com/services/...
 
-# Autenticação básica opcional para a UI/API (/metrics e /healthz ficam abertos).
+# Autenticação básica da UI/API (/healthz e /readyz ficam abertos; /metrics, ver metrics.token).
+# Sem password nem existingSecret, uma senha aleatória é gerada no Secret (ver NOTES do release).
+# enabled=false deixa a API aberta (AUTH_DISABLED=true): só para testes locais. Sirva a UI
+# sempre com TLS (ingress.tls): Basic Auth trafega a senha em cada requisição.
 auth:
-  enabled: false
+  enabled: true
   username: admin
   password: ""
   existingSecret: ""      # chaves AUTH_USERNAME e AUTH_PASSWORD
@@ -139,6 +143,9 @@ seed:
   #    url: ${SLACK_WEBHOOK_URL}
 
 metrics:
+  # Bearer token exigido em /metrics (gravado no Secret como METRICS_TOKEN; o ServiceMonitor
+  # passa a enviá-lo). Vazio = /metrics aberto: restrinja com networkPolicy.prometheus.
+  token: ""
   serviceMonitor:
     enabled: false
     interval: 60s
@@ -176,8 +183,9 @@ networkPolicy:
   # Saída para a internet: fontes de releases, webhooks e Prometheus/Thanos externos.
   internet:
     enabled: false
-    # Destinos bloqueados (padrão: redes privadas, ou seja, só internet pública).
-    except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    # Destinos bloqueados (padrão: redes privadas e metadata, ou seja, só internet pública).
+    # 169.254.0.0/16: metadata da nuvem (credenciais do nó); 100.64.0.0/10: CGNAT/rede interna de alguns provedores.
+    except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
 
 grafana:
   dashboard:

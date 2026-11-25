@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from . import safehttp
 from .config import expand_env, get_settings
 from .models import Report, Webhook, utcnow
 from .report import STATUS_ICON, _pct
@@ -142,7 +143,7 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
         for payload in payloads:
             resp = await client.post(url, json=payload)
             if resp.status_code >= 300:
-                return {"webhook": webhook.name, "ok": False, "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+                return {"webhook": webhook.name, "ok": False, "detail": f"HTTP {resp.status_code}"}  # no body: SSRF read
         return {"webhook": webhook.name, "ok": True, "detail": f"{len(payloads)} mensagem(ns) enviada(s)"}
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         return {"webhook": webhook.name, "ok": False, "detail": str(exc)}
@@ -155,7 +156,7 @@ def record_status(webhook: Webhook, result: dict, suffix: str = "") -> None:
 
 async def deliver_report(session, report: Report, webhooks: list[Webhook]) -> list[dict]:
     results = []
-    async with httpx.AsyncClient(timeout=get_settings().http_timeout) as client:
+    async with safehttp.client(timeout=get_settings().http_timeout) as client:
         for wh in webhooks:
             if not wh.enabled:
                 continue

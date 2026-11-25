@@ -4,13 +4,12 @@ import asyncio
 from datetime import timedelta
 from itertools import islice
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import logstore
+from . import logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
@@ -116,9 +115,15 @@ def _env_out(env: Environment) -> dict:
     return data
 
 
-def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...]) -> None:
-    for key, value in body.model_dump().items():
+def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...], url_field: str | None = None) -> None:
+    data = body.model_dump()
+    # A kept (masked) secret stays bound to its URL: otherwise pointing the URL at another host
+    # would send it the stored token/password.
+    url_changed = url_field and getattr(obj, url_field, None) not in (None, data.get(url_field))
+    for key, value in data.items():
         if key in secrets and value == SECRET_MASK:
+            if url_changed:
+                raise HTTPException(422, f"informe {key} novamente ao trocar {url_field}")
             continue  # unchanged secret
         setattr(obj, key, value)
 
@@ -134,7 +139,7 @@ def list_environments(db: Session = Depends(get_db)):
 @router.post("/environments", status_code=201)
 def create_environment(body: EnvironmentIn, db: Session = Depends(get_db)):
     env = Environment()
-    _apply_body(env, body, ENV_SECRETS)
+    _apply_body(env, body, ENV_SECRETS, "prometheus_url")
     db.add(env)
     _commit(db)
     return _env_out(env)
@@ -143,7 +148,7 @@ def create_environment(body: EnvironmentIn, db: Session = Depends(get_db)):
 @router.put("/environments/{env_id}")
 def update_environment(env_id: int, body: EnvironmentIn, db: Session = Depends(get_db)):
     env = _get(db, Environment, env_id)
-    _apply_body(env, body, ENV_SECRETS)
+    _apply_body(env, body, ENV_SECRETS, "prometheus_url")
     _commit(db)
     return _env_out(env)
 
@@ -183,7 +188,7 @@ async def discover_environment(env_id: int, namespace: str | None = None, db: Se
 async def suggest_source(name: str | None = None, image: str | None = None, chart: str | None = None):
     """Likely release sources for an app (image label, Artifact Hub, Docker Hub, GitHub search)."""
     s = get_settings()
-    async with httpx.AsyncClient(timeout=s.http_timeout, follow_redirects=True,
+    async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
                                  headers={"User-Agent": "changelog-watcher"}) as client:
         return {"candidates": await suggest_sources(client, s, name=name, image=image, chart=chart)}
 
@@ -493,7 +498,7 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
 
     w = _get(db, Webhook, hook_id)
     data = build_report_data(db)
-    async with httpx.AsyncClient(timeout=get_settings().http_timeout) as client:
+    async with safehttp.client(timeout=get_settings().http_timeout) as client:
         result = await send_webhook(w, data, render_markdown(data), client)
     record_status(w, result, " (teste)")
     return result

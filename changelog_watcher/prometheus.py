@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import safehttp
 from .config import expand_env
 from .versioning import ghcr_repository, image_repository, image_tag, parse_version
 
@@ -114,18 +115,19 @@ async def instant_query(environment, promql: str, timeout: float = 15.0) -> list
     elif environment.prometheus_auth == "basic" and environment.prometheus_username:
         auth = (expand_env(environment.prometheus_username) or "", expand_env(environment.prometheus_password) or "")
     try:
-        async with httpx.AsyncClient(timeout=timeout, verify=environment.prometheus_verify_tls, auth=auth) as client:
+        async with safehttp.client(timeout=timeout, verify=environment.prometheus_verify_tls, auth=auth) as client:
             resp = await client.get(url, params={"query": promql}, headers=headers)
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         raise PrometheusError(f"falha ao consultar Prometheus: {exc}") from exc
+    # Never echo the body: the URL is user-configured, so it would turn this into an SSRF read.
     if resp.status_code >= 400:
-        raise PrometheusError(f"Prometheus respondeu {resp.status_code}: {resp.text[:200]}")
+        raise PrometheusError(f"Prometheus respondeu HTTP {resp.status_code}")
     try:
         body = resp.json()
     except ValueError:
         body = None
     if not isinstance(body, dict):  # e.g. an HTML login page answered with 200
-        raise PrometheusError(f"resposta inválida do Prometheus: {resp.text[:200]}")
+        raise PrometheusError("resposta inválida: não é a API do Prometheus (confira a URL)")
     if body.get("status") != "success":
         raise PrometheusError(f"erro na consulta: {body.get('error')}")
     return body.get("data", {}).get("result", [])
