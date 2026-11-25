@@ -91,3 +91,59 @@ def test_chart_name():
     assert chart_name("argo-cd-5.46.7") == "argo-cd"
     assert chart_name("app-1.2.3-rc.1") == "app"
     assert chart_name("k8s-1.2.0-exporter-0.3.1") == "k8s-1.2.0-exporter"  # só o último -X.Y.Z é versão
+
+
+def _hub_search(mock, query, results):
+    mock.get("https://hub.docker.com/v2/search/repositories/", params={"query": query}).mock(return_value=httpx.Response(200, json={"results": results}))
+
+
+def _hub_image(mock, repo, tag, labels):
+    base = f"https://registry-1.docker.io/v2/{repo}"
+    mock.get(f"{base}/manifests/{tag}").mock(return_value=httpx.Response(200, json={"config": {"digest": "sha256:c"}}))
+    mock.get(f"{base}/blobs/sha256:c").mock(return_value=httpx.Response(200, json={"config": {"Labels": labels}}))
+
+
+def test_suggest_source_internal_mirror_of_official_image(client):
+    """registry.intranet/nginx run by a workload named "frontend": the image name wins."""
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(host="testserver").pass_through()
+        mock.get(host="artifacthub.io").mock(return_value=httpx.Response(200, json={"packages": []}))
+        _hub_search(mock, "nginx", [{"repo_name": "nginx", "is_official": True, "pull_count": 10**10},
+                           {"repo_name": "fulano/nginx", "pull_count": 50}])
+        _hub_image(mock, "library/nginx", "1.30.0", {})
+        mock.get("https://api.github.com/search/repositories", params={"q": "nginx in:name"}).mock(
+            return_value=httpx.Response(200, json={"items": [{"name": "nginx", "full_name": "nginx/nginx", "stargazers_count": 33000}]}))
+        mock.get("https://api.github.com/search/repositories", params={"q": "frontend in:name"}).mock(
+            return_value=httpx.Response(200, json={"items": [{"name": "frontend", "full_name": "x/frontend", "stargazers_count": 3}]}))
+        r = client.get("/api/suggest-source", params={"name": "frontend", "image": "registry.intranet/nginx:1.30.0"})
+    assert [(c["source_type"], c["repository"]) for c in r.json()["candidates"]] == [
+        ("dockerhub", "nginx"),  # mesma tag existe na imagem oficial
+        ("github_releases", "nginx/nginx"),  # busca pelo nome da imagem; x/frontend (★ 3) é ruído
+    ]
+
+
+def test_suggest_source_internal_mirror_label(client):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(host="testserver").pass_through()
+        mock.get(host="artifacthub.io").mock(return_value=httpx.Response(200, json={"packages": []}))
+        mock.get(host="api.github.com").mock(return_value=httpx.Response(200, json={"items": []}))
+        mock.get(host="ghcr.io").mock(return_value=httpx.Response(404))  # ghcr.io/plataforma/podinfo
+        mock.get("https://registry-1.docker.io/v2/plataforma/podinfo/manifests/6.17.0").mock(return_value=httpx.Response(401))
+        _hub_search(mock, "podinfo", [{"repo_name": "stefanprodan/podinfo", "pull_count": 8 * 10**8}])
+        _hub_image(mock, "stefanprodan/podinfo", "6.17.0", {"org.opencontainers.image.source": "https://github.com/stefanprodan/podinfo"})
+        r = client.get("/api/suggest-source", params={"image": "registry.intranet/plataforma/podinfo:6.17.0"})
+        assert [(c["source_type"], c["repository"]) for c in r.json()["candidates"]] == [
+            ("github_releases", "stefanprodan/podinfo"), ("dockerhub", "stefanprodan/podinfo")]
+        _hub_image(mock, "fulano/pagamentos-api", "2.3.1", {})  # existe, mas é pessoal (poucos pulls)
+        mock.get(host="registry-1.docker.io").mock(return_value=httpx.Response(401))  # time/pagamentos-api
+        _hub_search(mock, "pagamentos-api", [{"repo_name": "fulano/pagamentos-api", "pull_count": 300}])  # imagem pessoal: ignorada
+        r = client.get("/api/suggest-source", params={"image": "registry.intranet/time/pagamentos-api:2.3.1"})
+        assert r.json()["candidates"] == []
+
+
+def test_public_refs_keeps_original_registry_in_path():
+    import asyncio
+    from changelog_watcher.suggest import _public_refs
+    assert asyncio.run(_public_refs(None, "harbor.corp/proxy/quay.io/prometheus/prometheus:v3.1.0")) == [
+        "quay.io/prometheus/prometheus:v3.1.0"]
+    assert asyncio.run(_public_refs(None, "ghcr.io/org/app:1")) == []  # já é pública
