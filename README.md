@@ -405,30 +405,46 @@ helm lint deploy/helm/changelog-watcher
 
 ### Versionamento e releases
 
-Versões seguem `vX.Y.Z` (com `v`) no chart (`version`/`appVersion`), nas tags, na imagem e
-na release. O `pyproject.toml` segue o padrão do pip, sem `v` (`X.Y.Z`, rc como `X.Y.ZrcN`).
+A imagem da aplicação e o chart Helm têm **versões separadas**, cada uma com seu padrão de tag:
+
+| Componente | Muda quando alterar | Tag e release | Arquivos atualizados |
+|---|---|---|---|
+| Imagem | `changelog_watcher/`, `Dockerfile`, `.dockerignore`, `pyproject.toml` | `vX.Y.Z` + imagem no GHCR | `version` do `pyproject.toml`, `appVersion` do `Chart.yaml` |
+| Chart Helm | `deploy/helm/changelog-watcher/` | `chart-vX.Y.Z` | `version` do `Chart.yaml` |
+
+Uma nova imagem muda o `appVersion` (a imagem padrão do chart), então também gera uma versão
+do chart: patch, se o chart em si não mudou. Documentação, testes e CI **não geram versão**:
+as mudanças de README e `docs/` esperam a próxima release de imagem ou chart e entram nas
+notas dela. As tags `vX.Y.Z` anteriores à separação valiam para os dois; o chart parte
+delas até existir a primeira `chart-vX.Y.Z`.
+
+Versões usam `vX.Y.Z` (com `v`) no `Chart.yaml`, nas tags, na imagem e na release. O
+`pyproject.toml` segue o padrão do pip, sem `v` (`X.Y.Z`, rc como `X.Y.ZrcN`).
 
 Todo PR roda o workflow `ci` (testes, dashboard e Helm); o resultado de cada teste aparece no
 resumo da execução no GitHub Actions e num comentário no PR (atualizado a cada push). Cada merge na `main` roda o workflow `release`, que
-primeiro executa o `ci` e só então gera a release:
+primeiro executa o `ci` e só então, para cada componente que mudou desde a sua última tag:
 
-1. o Copilot CLI lê as mudanças desde a última versão (commits, arquivos e diff) e responde
-   `major`, `minor` ou `patch` mais até 3 tópicos descrevendo o que mudou;
-2. a versão vem do `pyproject.toml`, do `Chart.yaml` ou de uma tag `vX.Y.Z-rcN` quando for
-   maior que a última tag `vX.Y.Z` (vale a maior). O sufixo `-rcN` é sempre removido: o merge
+1. o Copilot CLI lê as mudanças do componente (commits, arquivos e diff, mais README e `docs/`)
+   e responde `major`, `minor` ou `patch` mais até 3 tópicos descrevendo o que mudou;
+2. a versão vem do arquivo do componente (`pyproject.toml`/`appVersion` para a imagem,
+   `version` do `Chart.yaml` para o chart) ou, só na imagem, de uma tag `vX.Y.Z-rcN`, quando
+   for maior que a última tag final (vale a maior). O sufixo `-rcN` é sempre removido: o merge
    na `main` é a versão final (`v0.2.0-rc3` → `v0.2.0`). Senão a última tag é incrementada
-   pela classificação do Copilot (sem resposta válida, pelas mensagens de commit:
-   `BREAKING CHANGE`/`tipo!:`/`[major]` → major, `feat:`/`[minor]` → minor, o resto → patch);
+   pela classificação do Copilot (sem resposta válida, pelas mensagens dos commits do
+   componente: `BREAKING CHANGE`/`tipo!:`/`[major]` → major, `feat:`/`[minor]` → minor, o resto → patch);
 3. se o `pyproject.toml` ou o `Chart.yaml` ficaram desatualizados, o workflow faz o commit
-   corrigindo (`chore(release): vX.Y.Z [skip ci]`);
-4. cria a tag `vX.Y.Z`, publica `ghcr.io/andresantiiago/changelog-watcher` com as tags
-   `vX.Y.Z`, `vX.Y`, `latest` e `sha-<commit>`, e cria a release no GitHub com a descrição
-   do Copilot (ou notas automáticas, se ele falhar).
+   corrigindo (`chore(release): vX.Y.Z, chart-vX.Y.Z [skip ci]`);
+4. cria as tags; para a imagem publica `ghcr.io/andresantiiago/changelog-watcher` com as tags
+   `vX.Y.Z`, `vX.Y`, `latest` e `sha-<commit>`; e cria as releases no GitHub com a descrição
+   do Copilot (ou os assuntos dos commits do componente desde a última tag dele, se o
+   Copilot falhar). A release do chart não é marcada como
+   "Latest".
 
 Durante o desenvolvimento, criar uma tag `vX.Y.Z-rcN` (ex.: `git tag v0.2.0-rc1 && git push origin v0.2.0-rc1`)
 publica a imagem `vX.Y.Z-rcN` (sem mexer em `latest`) e uma pre-release no GitHub, sem
 commit na `main`. No merge seguinte a release sai como `vX.Y.Z`.
 
 O chart usa `appVersion` como tag da imagem, então cada versão do chart aponta para a
-imagem da mesma release. O workflow usa o secret `GH_TOKEN`: um token fine-grained com
-**Contents** (escrita, para o commit e a tag) e **Copilot Requests**.
+imagem mais recente na data da release dele. O workflow usa o secret `GH_TOKEN`: um token fine-grained com
+**Contents** (escrita, para o commit e as tags) e **Copilot Requests**.

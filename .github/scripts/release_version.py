@@ -1,23 +1,39 @@
-"""Decide a próxima versão (``vX.Y.Z``) e sincroniza pyproject.toml e Chart.yaml.
+"""Decide as próximas versões da imagem e do chart e sincroniza pyproject.toml e Chart.yaml.
 
-Chart (version/appVersion), tag, imagem e release usam ``vX.Y.Z[-rcN]``; o pyproject.toml
-segue o padrão do pip (PEP 440), sem ``v``: ``X.Y.Z`` / ``X.Y.ZrcN``.
+Dois componentes, cada um com sua tag e só os seus arquivos:
 
-``--changes ARQ``: grava em ARQ as mudanças desde a última tag final (commits, arquivos e
-diff truncado), que o Copilot classifica (linha 1: major|minor|patch) e resume (demais linhas).
+- **imagem** (``changelog_watcher/``, ``Dockerfile``, ``.dockerignore``, ``pyproject.toml``):
+  tag ``vX.Y.Z``, imagem no GHCR e release; atualiza ``version`` do pyproject.toml (PEP 440,
+  sem ``v``) e ``appVersion`` do Chart.yaml.
+- **chart** (``deploy/helm/changelog-watcher/``): tag ``chart-vX.Y.Z`` e release; atualiza
+  ``version`` do Chart.yaml. Uma nova imagem muda o ``appVersion`` (imagem padrão do chart),
+  então também gera uma versão do chart (patch, se o chart em si não mudou).
 
-Merge na main (sem argumento):
-1. Se a versão declarada (pyproject.toml, ``version``/``appVersion`` do Chart.yaml) ou a
-   de uma tag ``vX.Y.Z-rcN`` for maior que a última tag final ``vX.Y.Z``, usa a maior
-   delas sempre sem o sufixo: o merge na main é a versão final (v0.2.0-rc3 -> v0.2.0).
-2. Senão, incrementa a última tag final pelo tipo que o Copilot respondeu (arquivo em
-   $AI_FILE); sem resposta válida, pelas mensagens de commit: ``BREAKING CHANGE`` /
-   ``tipo!:`` / ``[major]`` -> major; ``feat:`` / ``[minor]`` -> minor; o resto -> patch.
+O resto (docs, testes, CI) não gera versão: README e ``docs/`` entram nas notas da próxima
+release. Antes da separação as tags ``vX.Y.Z`` valiam para os dois; sem nenhuma tag
+``chart-v*``, o chart parte da última ``vX.Y.Z``.
 
-Tag de release candidate (argumento ``vX.Y.Z-rcN``): só valida e grava essa versão nos
-arquivos, para a imagem reportar a versão certa (sem commit).
+``--changes``: grava ``changes-<componente>.txt`` (commits, arquivos e diff truncado
+desde a última tag do componente) para cada componente com mudanças, que o Copilot classifica
+(linha 1: major|minor|patch) e resume (demais linhas) em ``copilot-<componente>.txt``.
+Escreve ``any=true|false`` em $GITHUB_OUTPUT.
 
-Escreve ``version``, ``changed``, ``prerelease`` e ``notes`` em $GITHUB_OUTPUT (ou stdout).
+Merge na main (sem argumento), para cada componente com mudanças:
+1. Se a versão declarada (pyproject.toml/``appVersion`` para a imagem, ``version`` do Chart.yaml
+   para o chart) ou, só na imagem, a de uma tag ``vX.Y.Z-rcN`` for maior que a última tag final,
+   usa a maior delas sempre sem o sufixo: o merge na main é a versão final (v0.2.0-rc3 -> v0.2.0).
+2. Senão, incrementa a última tag final pelo tipo que o Copilot respondeu (arquivos em
+   $AI_DIR); sem resposta válida, pelas mensagens dos commits do componente:
+   ``BREAKING CHANGE`` / ``tipo!:`` / ``[major]`` -> major; ``feat:`` / ``[minor]`` -> minor;
+   o resto -> patch.
+
+Tag de release candidate da imagem (argumento ``vX.Y.Z-rcN``): só valida e grava essa versão
+nos arquivos da imagem, para ela reportar a versão certa (sem commit).
+
+Escreve ``app_version``, ``chart_tag``, ``changed``, ``prerelease``, ``app_notes`` e
+``chart_notes`` em $GITHUB_OUTPUT (ou stdout); versão vazia = sem release. Sem notas do Copilot,
+as notas são os assuntos dos commits do componente desde a sua última tag (``--generate-notes``
+partiria da release anterior por data, que pode ser a do outro componente).
 """
 
 from __future__ import annotations
@@ -32,6 +48,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = ROOT / "pyproject.toml"
 CHART = ROOT / "deploy/helm/changelog-watcher/Chart.yaml"
+PATHS = {
+    "app": ("changelog_watcher", "Dockerfile", ".dockerignore", "pyproject.toml"),
+    "chart": ("deploy/helm/changelog-watcher",),
+}
+LABELS = {"app": "imagem da aplicação", "chart": "chart Helm"}
+DOC_PATHS = ("README.md", "docs")
+CHART_TAG = "chart-"
 SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 RC = re.compile(r"^v?(\d+\.\d+\.\d+)-?rc\.?\d+$")  # v0.2.0-rc1, 0.2.0rc1 (PEP 440)
 KINDS = ("major", "minor", "patch")
@@ -39,7 +62,7 @@ MAX_CHANGES = 60_000  # cabe num argumento de linha de comando (limite de 128 Ki
 
 
 def parse(text: str | None) -> tuple[int, int, int] | None:
-    m = SEMVER.match((text or "").strip())
+    m = SEMVER.match((text or "").strip().removeprefix(CHART_TAG))
     return tuple(int(x) for x in m.groups()) if m else None
 
 
@@ -108,10 +131,13 @@ def pep440(version: str) -> str:
     return re.sub(r"-?rc\.?", "rc", version.removeprefix("v"))
 
 
-def sync_files(version: str) -> bool:
-    changed = _set(PYPROJECT, r'^(version\s*=\s*")[^"]*(")', pep440(version))
-    changed |= _set(CHART, r"^(version:\s*)\S+()", version)
-    changed |= _set(CHART, r'^(appVersion:\s*")[^"]*(")', version)
+def sync_files(app_version: str = "", chart_version: str = "") -> bool:
+    changed = False
+    if app_version:
+        changed |= _set(PYPROJECT, r'^(version\s*=\s*")[^"]*(")', pep440(app_version))
+        changed |= _set(CHART, r'^(appVersion:\s*")[^"]*(")', app_version)
+    if chart_version:
+        changed |= _set(CHART, r"^(version:\s*)\S+()", chart_version)
     return changed
 
 
@@ -119,52 +145,106 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
 
-def last_final_tag() -> str | None:
-    finals = [t for t in _git("tag", "--list", "v*", "--merged", "HEAD").split() if parse(t)]
+def last_final_tag(prefix: str = "") -> str | None:
+    finals = [t for t in _git("tag", "--list", f"{prefix}v*", "--merged", "HEAD").split() if parse(t)]
     return max(finals, key=parse) if finals else None
 
 
-def write_changes(path: str) -> None:
-    last = last_final_tag()
-    start = last or _git("rev-list", "--max-parents=0", "HEAD").split()[0]  # 1ª release: desde o 1º commit
-    text = (f"Commits desde {last or 'o início'}:\n{_git('log', '--format=- %s%n%b', f'{start}..HEAD')}\n\n"
-            f"Arquivos alterados:\n{_git('diff', '--stat', start, 'HEAD')}\n\n"
-            f"Diff:\n{_git('diff', start, 'HEAD')}")
-    Path(path).write_text(text[:MAX_CHANGES])
+def last_tags() -> dict[str, str | None]:
+    app = last_final_tag()
+    return {"app": app, "chart": last_final_tag(CHART_TAG) or app}  # tags vX.Y.Z antigas valiam para os dois
 
 
-def _declared() -> list[str]:
+def _since(tag: str | None) -> str:
+    return tag or _git("rev-list", "--max-parents=0", "HEAD").split()[0]  # 1ª release: desde o 1º commit
+
+
+def changed(component: str, tag: str | None) -> bool:
+    return bool(_git("diff", "--name-only", _since(tag), "HEAD", "--", *PATHS[component]))
+
+
+def commit_log(component: str, tag: str | None, fmt: str = "%B") -> str:
+    return _git("log", f"--format={fmt}", f"{tag}..HEAD" if tag else "HEAD", "--", *PATHS[component])
+
+
+def write_changes() -> bool:
+    any_changes = False
+    for component, tag in last_tags().items():
+        if not changed(component, tag):
+            continue
+        any_changes = True
+        start, paths = _since(tag), (*PATHS[component], *DOC_PATHS)
+        text = (f"Componente: {LABELS[component]}\n\n"
+                f"Commits desde {tag or 'o início'}:\n{_git('log', '--format=- %s%n%b', f'{start}..HEAD', '--', *paths)}\n\n"
+                f"Arquivos alterados:\n{_git('diff', '--stat', start, 'HEAD', '--', *paths)}\n\n"
+                f"Diff:\n{_git('diff', start, 'HEAD', '--', *paths)}")
+        Path(f"changes-{component}.txt").write_text(text[:MAX_CHANGES])
+    return any_changes
+
+
+def _declared() -> dict[str, list[str]]:
     chart = CHART.read_text()
-    found = [re.search(r'^version\s*=\s*"([^"]*)"', PYPROJECT.read_text(), re.M),
-             re.search(r"^version:\s*(\S+)", chart, re.M), re.search(r'^appVersion:\s*"?([^"\s]+)', chart, re.M)]
-    return [m.group(1) for m in found if m]
+    py = re.search(r'^version\s*=\s*"([^"]*)"', PYPROJECT.read_text(), re.M)
+    app = re.search(r'^appVersion:\s*"?([^"\s]+)', chart, re.M)
+    ver = re.search(r"^version:\s*(\S+)", chart, re.M)
+    return {"app": [m.group(1) for m in (py, app) if m], "chart": [ver.group(1)] if ver else []}
+
+
+def _ai(component: str) -> tuple[str | None, str]:
+    d = os.environ.get("AI_DIR")
+    path = d and Path(d, f"copilot-{component}.txt")
+    return read_ai(path.read_text()) if path and path.exists() else (None, "")
+
+
+def plan() -> dict[str, str]:
+    """Versões (vazio = sem release) e notas de cada componente desde a última tag."""
+    declared, tags = _declared(), last_tags()
+    out = {"app_version": "", "chart_version": "", "app_notes": "", "chart_notes": ""}
+    if changed("app", tags["app"]):
+        kind, notes = _ai("app")
+        rc_tags = _git("tag", "--list", "v*").split()  # rc pode estar em commits fora da main (squash)
+        out["app_version"] = next_version(declared["app"], tags["app"], commit_log("app", tags["app"]),
+                                          rc_tags, kind)
+        out["app_notes"] = notes or commit_log("app", tags["app"], "- %s")
+    chart_changed = changed("chart", tags["chart"])
+    if chart_changed or out["app_version"]:
+        kind, notes = _ai("chart") if chart_changed else (None, "")
+        if chart_changed and not notes:
+            notes = commit_log("chart", tags["chart"], "- %s")
+        messages = commit_log("chart", tags["chart"]) if chart_changed else ""  # só appVersion: patch
+        out["chart_version"] = next_version(declared["chart"], tags["chart"], messages, kind=kind)
+        if out["app_version"]:
+            notes = f"{notes}\n- Atualiza a imagem padrão (appVersion) para {out['app_version']}".strip()
+        out["chart_notes"] = notes
+    return out
+
+
+def _emit(text: str) -> None:
+    if gh := os.environ.get("GITHUB_OUTPUT"):
+        with open(gh, "a") as f:
+            f.write(text)
+    sys.stdout.write(text)
 
 
 def main(argv: list[str]) -> None:
     if argv[:1] == ["--changes"]:
-        write_changes(argv[1])
-        return
-    declared = _declared()
-    ai = Path(os.environ["AI_FILE"]) if os.environ.get("AI_FILE") else None
-    kind, notes = read_ai(ai.read_text()) if ai and ai.exists() else (None, "")
-    if argv:  # build de uma tag de release candidate
+        return _emit(f"any={str(write_changes()).lower()}\n")
+    if argv:  # build de uma tag de release candidate da imagem
         if not argv[0].startswith("v") or not RC.match(argv[0]):
             sys.exit(f"tag inválida: {argv[0]} (esperado vX.Y.Z-rcN)")
-        version, last_tag, prerelease = argv[0], argv[0], True
+        notes = _ai("app")[1] or commit_log("app", last_final_tag(), "- %s")
+        result = {"app_version": argv[0], "chart_version": "", "app_notes": notes, "chart_notes": ""}
+        prerelease = True
     else:
-        last_tag = last_final_tag()
-        messages = _git("log", "--format=%B", f"{last_tag}..HEAD" if last_tag else "HEAD")
-        rc_tags = _git("tag", "--list", "v*").split()  # rc pode estar em commits fora da main (squash)
-        version, prerelease = next_version(declared, last_tag, messages, rc_tags, kind), False
-    changed = sync_files(version)
-    eof = f"EOF_{secrets.token_hex(8)}"
-    out = (f"version={version}\nchanged={str(changed).lower()}\nprerelease={str(prerelease).lower()}\n"
-           f"notes<<{eof}\n{notes}\n{eof}\n")
-    if gh := os.environ.get("GITHUB_OUTPUT"):
-        with open(gh, "a") as f:
-            f.write(out)
-    sys.stdout.write(f"última tag: {last_tag or '-'}, declaradas: {', '.join(declared)}, "
-                     f"copilot: {kind or '-'}\n{out}")
+        result, prerelease = plan(), False
+    changed_files = sync_files(result["app_version"], result["chart_version"])
+    chart_tag = CHART_TAG + result["chart_version"] if result["chart_version"] else ""
+    out = (f"app_version={result['app_version']}\nchart_tag={chart_tag}\n"
+           f"changed={str(changed_files).lower()}\nprerelease={str(prerelease).lower()}\n")
+    for key in ("app_notes", "chart_notes"):
+        eof = f"EOF_{secrets.token_hex(8)}"
+        out += f"{key}<<{eof}\n{result[key]}\n{eof}\n"
+    _emit(out)
 
 
 if __name__ == "__main__":

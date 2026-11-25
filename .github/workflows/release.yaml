@@ -15,9 +15,13 @@ jobs:
       contents: read
       pull-requests: write
 
-  # Merge na main: o Copilot classifica as mudanças (major/minor/patch) e escreve as notas;
-  # .github/scripts/release_version.py decide a versão vX.Y.Z, corrige pyproject.toml/Chart.yaml
-  # se o bump foi esquecido, cria a tag, publica a imagem no GHCR e, por fim, a release.
+  # Merge na main: imagem e chart Helm têm versões separadas. .github/scripts/release_version.py
+  # vê o que mudou desde a última tag de cada um: imagem (changelog_watcher/, Dockerfile,
+  # pyproject.toml) -> tag vX.Y.Z, imagem no GHCR e release; chart (deploy/helm/changelog-watcher/)
+  # -> tag chart-vX.Y.Z e release. Nova imagem também gera versão do chart (appVersion).
+  # Docs, testes e CI não geram versão: esperam a próxima release de imagem ou chart.
+  # O Copilot classifica cada componente (major/minor/patch) e escreve as notas; o script
+  # corrige pyproject.toml/Chart.yaml se o bump foi esquecido e o workflow cria as tags.
   # Tag vX.Y.Z-rcN: publica a imagem vX.Y.Z-rcN e uma pre-release (sem commit nem tag).
   # GH_TOKEN: PAT fine-grained com Contents (escrita) e Copilot Requests.
   version:
@@ -27,9 +31,11 @@ jobs:
     permissions:
       contents: write
     outputs:
-      version: ${{ steps.v.outputs.version }}
+      app_version: ${{ steps.v.outputs.app_version }}
+      chart_tag: ${{ steps.v.outputs.chart_tag }}
       prerelease: ${{ steps.v.outputs.prerelease }}
-      notes: ${{ steps.v.outputs.notes }}
+      app_notes: ${{ steps.v.outputs.app_notes }}
+      chart_notes: ${{ steps.v.outputs.chart_notes }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,14 +44,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Mudanças desde a última versão
-        run: python3 .github/scripts/release_version.py --changes changes.txt
+      - name: Mudanças desde a última versão de cada componente
+        id: changes
+        run: python3 .github/scripts/release_version.py --changes
       - name: Classificação e notas (Copilot)
-        continue-on-error: true  # sem resposta: bump pelas mensagens de commit e notas automáticas
+        if: steps.changes.outputs.any == 'true'
+        continue-on-error: true  # sem resposta: bump e notas pelas mensagens de commit
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           npm install -g @github/copilot
+          for f in changes-*.txt; do
           PROMPT="Classifique as mudanças abaixo segundo SemVer:
           - major: breaking change (Mudanças que quebram compatibilidade, precisam ser realizadas em janelas de manutenção para redução de impacto e coordenação com os usuários).
           - minor: nova funcionalidade retrocompatível.
@@ -65,32 +74,38 @@ jobs:
           - Não repita a lista de commits e não use títulos.
           - Use no máximo 3 tópicos curtos.
 
-          $(cat changes.txt)"
-          copilot -p "$PROMPT" -s --no-color --no-custom-instructions --disable-builtin-mcps > copilot.txt
-          cat copilot.txt
+          $(cat "$f")"
+          out="copilot-${f#changes-}"  # copilot-app.txt / copilot-chart.txt
+          # Falha num componente não impede o outro; o script cai nas mensagens de commit.
+          copilot -p "$PROMPT" -s --no-color --no-custom-instructions --disable-builtin-mcps > "$out" || rm -f "$out"
+          echo "== $out"; cat "$out" 2>/dev/null || true
+          done
       - id: v
         env:
-          AI_FILE: copilot.txt
+          AI_DIR: .
         run: python3 .github/scripts/release_version.py ${{ github.ref_type == 'tag' && github.ref_name || '' }}
       - name: Commit das versões atualizadas
         if: steps.v.outputs.changed == 'true' && steps.v.outputs.prerelease == 'false'
         env:
-          V: ${{ steps.v.outputs.version }}
+          TAGS: ${{ steps.v.outputs.app_version }} ${{ steps.v.outputs.chart_tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): $V [skip ci]"
+          git commit -am "chore(release): $(echo $TAGS | sed 's/ /, /') [skip ci]"  # ex.: v0.3.0, chart-v0.2.1
           git push origin HEAD:main
-      - name: Tag
+      - name: Tags
         if: steps.v.outputs.prerelease == 'false'
         env:
-          V: ${{ steps.v.outputs.version }}
+          TAGS: ${{ steps.v.outputs.app_version }} ${{ steps.v.outputs.chart_tag }}
         run: |
-          git tag -a "$V" -m "$V"
-          git push origin "$V"
+          for t in $TAGS; do
+            git tag -a "$t" -m "$t"
+            git push origin "$t"
+          done
 
   image:
     needs: version
+    if: needs.version.outputs.app_version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -98,10 +113,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.version.outputs.version }}
+          ref: ${{ needs.version.outputs.app_version }}
       - name: Versão do rc no pacote da imagem
         if: needs.version.outputs.prerelease == 'true'
-        run: python3 .github/scripts/release_version.py "${{ needs.version.outputs.version }}"
+        run: python3 .github/scripts/release_version.py "${{ needs.version.outputs.app_version }}"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -113,8 +128,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=${{ needs.version.outputs.version }}
-            type=semver,pattern=v{{major}}.{{minor}},value=${{ needs.version.outputs.version }}
+            type=raw,value=${{ needs.version.outputs.app_version }}
+            type=semver,pattern=v{{major}}.{{minor}},value=${{ needs.version.outputs.app_version }}
             type=raw,value=latest,enable=${{ needs.version.outputs.prerelease == 'false' }}
             type=sha
       - uses: docker/build-push-action@v6
@@ -126,21 +141,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Roda mesmo sem imagem (só o chart mudou); não roda se a imagem falhou. As notas vêm sempre
+  # do script (Copilot ou commits desde a tag do componente), não de --generate-notes.
   release:
     needs: [version, image]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.image.result != 'failure' }}
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Release no GitHub
+      - name: Release da imagem
+        if: needs.version.outputs.app_version != ''
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          V: ${{ needs.version.outputs.version }}
-          NOTES: ${{ needs.version.outputs.notes }}
+          V: ${{ needs.version.outputs.app_version }}
+          NOTES: ${{ needs.version.outputs.app_notes }}
           PRE: ${{ needs.version.outputs.prerelease == 'true' && '--prerelease' || '' }}
         run: |
-          if [ -n "$NOTES" ]; then
-            printf '%s\n' "$NOTES" > notes.md
-            NOTES_ARG="--notes-file notes.md"
-          else
-            NOTES_ARG="--generate-notes"
-          fi
-          gh release create "$V" --repo "${{ github.repository }}" --title "$V" --verify-tag $NOTES_ARG $PRE
+          printf '%s\n' "$NOTES" > notes.md
+          gh release create "$V" --repo "$REPO" --title "$V" --verify-tag --notes-file notes.md $PRE
+      - name: Release do chart
+        if: needs.version.outputs.chart_tag != ''
+        env:
+          V: ${{ needs.version.outputs.chart_tag }}
+          NOTES: ${{ needs.version.outputs.chart_notes }}
+        run: |  # --latest=false: "Latest" fica com a release da imagem
+          printf '%s\n' "$NOTES" > notes.md
+          gh release create "$V" --repo "$REPO" --title "$V" --verify-tag --latest=false --notes-file notes.md
