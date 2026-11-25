@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from itertools import islice
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import logstore
+from . import logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
@@ -33,7 +33,6 @@ from .models import (
     AppSetting,
     Deployment,
     Environment,
-    LogEntry,
     Project,
     Release,
     Report,
@@ -116,9 +115,15 @@ def _env_out(env: Environment) -> dict:
     return data
 
 
-def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...]) -> None:
-    for key, value in body.model_dump().items():
+def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...], url_field: str | None = None) -> None:
+    data = body.model_dump()
+    # A kept (masked) secret stays bound to its URL: otherwise pointing the URL at another host
+    # would send it the stored token/password.
+    url_changed = url_field and getattr(obj, url_field, None) not in (None, data.get(url_field))
+    for key, value in data.items():
         if key in secrets and value == SECRET_MASK:
+            if url_changed:
+                raise HTTPException(422, f"informe {key} novamente ao trocar {url_field}")
             continue  # unchanged secret
         setattr(obj, key, value)
 
@@ -134,7 +139,7 @@ def list_environments(db: Session = Depends(get_db)):
 @router.post("/environments", status_code=201)
 def create_environment(body: EnvironmentIn, db: Session = Depends(get_db)):
     env = Environment()
-    _apply_body(env, body, ENV_SECRETS)
+    _apply_body(env, body, ENV_SECRETS, "prometheus_url")
     db.add(env)
     _commit(db)
     return _env_out(env)
@@ -143,7 +148,7 @@ def create_environment(body: EnvironmentIn, db: Session = Depends(get_db)):
 @router.put("/environments/{env_id}")
 def update_environment(env_id: int, body: EnvironmentIn, db: Session = Depends(get_db)):
     env = _get(db, Environment, env_id)
-    _apply_body(env, body, ENV_SECRETS)
+    _apply_body(env, body, ENV_SECRETS, "prometheus_url")
     _commit(db)
     return _env_out(env)
 
@@ -183,7 +188,7 @@ async def discover_environment(env_id: int, namespace: str | None = None, db: Se
 async def suggest_source(name: str | None = None, image: str | None = None, chart: str | None = None):
     """Likely release sources for an app (image label, Artifact Hub, Docker Hub, GitHub search)."""
     s = get_settings()
-    async with httpx.AsyncClient(timeout=s.http_timeout, follow_redirects=True,
+    async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
                                  headers={"User-Agent": "changelog-watcher"}) as client:
         return {"candidates": await suggest_sources(client, s, name=name, image=image, chart=chart)}
 
@@ -274,13 +279,6 @@ async def update_project(project_id: int, body: ProjectIn, refresh: bool = True,
 def delete_project(project_id: int, db: Session = Depends(get_db)):
     db.delete(_get(db, Project, project_id))
     return Response(status_code=204)
-
-
-@router.post("/projects/{project_id}/refresh")
-async def refresh_project(project_id: int, db: Session = Depends(get_db)):
-    _get(db, Project, project_id)
-    db.close()
-    return await run_refresh(project_ids=[project_id])
 
 
 @router.get("/projects/{project_id}/releases")
@@ -385,10 +383,10 @@ def releases_recent(days: int = 7, db: Session = Depends(get_db)):
 async def refresh(body: RefreshRequest | None = None):
     body = body or RefreshRequest()
     if body.wait:
-        return await run_refresh(body.project_ids, body.fetch, body.detect)
+        return await run_refresh(body.project_ids, detect=body.detect)
     if STATE.running:
         return {**STATE.to_dict(), "message": "atualização já em andamento"}
-    _spawn(run_refresh(body.project_ids, body.fetch, body.detect))
+    _spawn(run_refresh(body.project_ids, detect=body.detect))
     await asyncio.sleep(0)
     return {**STATE.to_dict(), "running": True, "message": "atualização iniciada"}
 
@@ -500,7 +498,7 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
 
     w = _get(db, Webhook, hook_id)
     data = build_report_data(db)
-    async with httpx.AsyncClient(timeout=get_settings().http_timeout) as client:
+    async with safehttp.client(timeout=get_settings().http_timeout) as client:
         result = await send_webhook(w, data, render_markdown(data), client)
     record_status(w, result, " (teste)")
     return result
@@ -541,19 +539,6 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
 # ------------------------------------------------------------------- logs
 @router.get("/logs")
 def list_logs(level: str | None = None, q: str | None = None, limit: int = Query(300, le=1000)):
-    logstore.flush()  # records are written by a background thread
-    db = logstore.session()
-    if db is None:
-        return []
-    stmt = select(LogEntry).order_by(LogEntry.id.desc()).limit(limit)
-    if level:
-        stmt = stmt.where(LogEntry.level == level.upper())
-    if q:
-        stmt = stmt.where(LogEntry.message.ilike(f"%{q}%"))
-    with db:
-        return [
-            # _iso: SQLite returns naive datetimes; without the offset the browser reads UTC as local time
-            {"id": e.id, "created_at": _iso(e.created_at), "level": e.level, "logger": e.logger,
-             "message": e.message, "detail": e.detail}
-            for e in db.scalars(stmt)
-        ]
+    level, q = (level or "").upper(), (q or "").lower()
+    rows = reversed(logstore.RECORDS.copy())  # copy: other threads append while we iterate
+    return list(islice((e for e in rows if (not level or e["level"] == level) and q in e["message"].lower()), limit))

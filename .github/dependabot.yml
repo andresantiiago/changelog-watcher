@@ -1,0 +1,7 @@
+# Mantém o digest da imagem base (Dockerfile) atualizado.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

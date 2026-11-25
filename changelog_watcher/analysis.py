@@ -10,7 +10,7 @@ from itertools import combinations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Deployment, Environment, Project, Release
+from .models import Deployment, Environment, Project, Release, aware
 from .versioning import (
     STATUS_LEVEL,
     STATUS_ORDER,
@@ -38,12 +38,6 @@ def pv(project: Project, text: str | None, use_pattern: bool = False) -> Version
                          two_part=project.version_scheme == "major_patch")
 
 
-def _aware(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
 @dataclass
 class VersionEntry:
     version: Version
@@ -51,7 +45,7 @@ class VersionEntry:
 
     @property
     def published_at(self) -> datetime | None:
-        return _aware(self.release.published_at)
+        return aware(self.release.published_at)
 
 
 def project_versions(project: Project, releases: list[Release] | None = None) -> dict[Version, VersionEntry]:
@@ -70,7 +64,7 @@ def project_versions(project: Project, releases: list[Release] | None = None) ->
         # Prefer the entry with notes, then the oldest publication date.
         a, b = prev.release, rel
         if (not a.notes and b.notes) or (
-            bool(a.notes) == bool(b.notes) and b.published_at and (not a.published_at or _aware(b.published_at) < _aware(a.published_at))
+            bool(a.notes) == bool(b.notes) and b.published_at and (not a.published_at or aware(b.published_at) < aware(a.published_at))
         ):
             out[v] = VersionEntry(v, rel)
     return _drop_stale(out)
@@ -139,7 +133,7 @@ class DeploymentStatus:
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return _aware(dt).isoformat() if dt else None
+    return aware(dt).isoformat() if dt else None
 
 
 def deployment_status(

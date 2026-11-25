@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
+
+from ..models import aware
 
 
 class SourceError(RuntimeError):
@@ -25,7 +27,7 @@ def parse_datetime(value) -> datetime | None:
     if not value:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return aware(value)
     text = str(value).strip()
     try:  # 3.11+ handles "Z" and Helm's nanoseconds (2024-01-02T10:11:12.123456789Z)
         dt = datetime.fromisoformat(text)
@@ -34,7 +36,7 @@ def parse_datetime(value) -> datetime | None:
             dt = datetime.strptime(text[:10], "%Y-%m-%d")
         except ValueError:
             return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return aware(dt)
 
 
 async def get_json(client: httpx.AsyncClient, url: str, **kwargs):

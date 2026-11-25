@@ -64,9 +64,6 @@ class Version:
     def __hash__(self) -> int:
         return hash(self._key())
 
-    def same_minor(self, other: "Version") -> bool:
-        return self.major == other.major and self.minor == other.minor
-
     def __str__(self) -> str:
         base = f"{self.major}.{self.patch}" if self.two_part else f"{self.major}.{self.minor}.{self.patch}"
         if self.build:
@@ -180,7 +177,7 @@ def classify(current: Version | None, available: Iterable[Version]) -> UpdateInf
         elif v.major == current.major and v.minor > current.minor:
             info.minor_behind += 1
             info.latest_minor = v
-        elif v.same_minor(current):
+        else:  # newer, same major.minor: bugfix
             info.patch_behind += 1
             info.latest_patch = v
 

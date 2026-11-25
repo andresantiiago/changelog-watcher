@@ -216,6 +216,11 @@ O chart cria o workload (StatefulSet ou Deployment, ver abaixo), Service, Secret
 do seed e, opcionalmente, Ingress, ServiceMonitor, PrometheusRule, NetworkPolicies e o
 ConfigMap do dashboard.
 
+A UI/API exige Basic Auth por padrão (`auth.enabled: true`). Sem `auth.password` nem
+`auth.existingSecret`, o chart gera uma senha aleatória no Secret (mantida nos upgrades); o
+comando para lê-la aparece nas notas do `helm install`. Use TLS no Ingress (`ingress.tls`):
+a senha vai em cada requisição.
+
 #### NetworkPolicies
 
 Para clusters que bloqueiam tráfego por padrão, há duas NetworkPolicies independentes
@@ -224,7 +229,7 @@ Para clusters que bloqueiam tráfego por padrão, há duas NetworkPolicies indep
 | Flag | Libera |
 |---|---|
 | `networkPolicy.prometheus.enabled` | ingress do namespace do Prometheus (scrape do `/metrics`) e egress para ele (consultas, porta `9090` por padrão) |
-| `networkPolicy.internet.enabled` | egress para a internet pública (`0.0.0.0/0` menos as redes privadas em `except`): fontes de releases, webhooks e Prometheus/Thanos externos |
+| `networkPolicy.internet.enabled` | egress para a internet pública (`0.0.0.0/0` menos as redes privadas, metadata da nuvem `169.254.0.0/16` e loopback em `except`): fontes de releases, webhooks e Prometheus/Thanos externos |
 
 ```yaml
 networkPolicy:
@@ -281,15 +286,25 @@ sobrescreve os campos que declara.
 
 Segredos (tokens do Prometheus, senhas, URLs de webhook) podem ser gravados como
 `${NOME_DA_VARIAVEL}` — o valor é lido do ambiente na hora do uso e nunca fica no
-banco. Valores digitados diretamente são mascarados nas respostas da API.
+banco. Valores digitados diretamente são mascarados nas respostas da API. Regras:
+
+- o campo inteiro deve ser o placeholder (`${SLACK_WEBHOOK_URL}`); um placeholder no meio de
+  um texto (`https://host/${X}`) não é expandido, para não ser enviado a um host qualquer;
+- as credenciais da própria aplicação (`AUTH_*`, `GITHUB_TOKEN`, `GITLAB_TOKEN`,
+  `METRICS_TOKEN`, `DATABASE_URL`) nunca são expandidas;
+- ao trocar a URL do Prometheus de um ambiente, o token/senha mascarado precisa ser informado de novo.
+
+Requisições a URLs configuradas (fontes, Prometheus, webhooks, inclusive redirects) são
+recusadas quando o host resolve para loopback ou link-local (metadata da nuvem,
+`169.254.169.254`). Redes privadas continuam permitidas.
 
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///./data/changelog-watcher.db` | banco SQLite (único suportado); `sqlite:///:memory:` = em memória, dados perdidos ao reiniciar |
 | `CONFIG_FILE` | — | YAML de seed |
 | `SEED_OVERWRITE` | `false` | seed sobrescreve alterações feitas pela UI |
-| `GITHUB_TOKEN` / `GITHUB_API_URL` | — / `https://api.github.com` | token e API (GitHub Enterprise) |
-| `GITLAB_TOKEN` / `GITLAB_URL` | — / `https://gitlab.com` | token e URL do GitLab |
+| `GITHUB_TOKEN` / `GITHUB_API_URL` | — / `https://api.github.com` | token e API (GitHub Enterprise); o token só é enviado a essa API (e a `raw.githubusercontent.com`), nunca ao `source_url` de uma aplicação |
+| `GITLAB_TOKEN` / `GITLAB_URL` | — / `https://gitlab.com` | token e URL do GitLab; o token só é enviado a essa URL |
 | `REFRESH_INTERVAL_MINUTES` | `360` | intervalo da busca automática (0 desativa); padrão, editável na página Configuração |
 | `REFRESH_ON_STARTUP` | `true` | busca ao iniciar |
 | `REPORT_CRON` | `0 9 * * mon` | cron do relatório semanal; padrão, editável na página Configuração |
@@ -298,7 +313,9 @@ banco. Valores digitados diretamente são mascarados nas respostas da API.
 | `TZ` | `UTC` | fuso do agendador |
 | `PUBLIC_URL` | — | link para a UI incluído no relatório |
 | `MAX_RELEASE_PAGES` | `3` | páginas de 100 releases/tags buscadas por fonte |
-| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API (`/metrics` e `/healthz` ficam abertos) |
+| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API, obrigatória (`/healthz` e `/readyz` ficam abertos); sem elas a aplicação não sobe |
+| `AUTH_DISABLED` | `false` | `true` roda sem autenticação (só para testes locais) |
+| `METRICS_TOKEN` | — | bearer token exigido em `/metrics`; vazio = aberto |
 | `SCHEDULER_ENABLED` | `true` | desativa o agendador interno |
 | `METRICS_CACHE_SECONDS` | `30` | cache das métricas calculadas |
 
@@ -314,7 +331,8 @@ ambiente (ou Secret do Kubernetes) e, nos campos da UI/seed, referencie com `${N
    repositórios privados, selecione-os e conceda a permissão *Contents: Read-only*.
 3. Copie o token (`github_pat_…`) e exporte `GITHUB_TOKEN`. Um token *classic* sem nenhum escopo
    também funciona para repositórios públicos (para privados, use o escopo `repo`).
-4. GitHub Enterprise: gere o token na sua instância e configure também `GITHUB_API_URL`.
+4. GitHub Enterprise: gere o token na sua instância e configure também `GITHUB_API_URL` (o token só
+   vai para essa URL; o `source_url` de uma aplicação nunca recebe o token).
 
 **`GITLAB_TOKEN`** — GitLab → *Preferences* → *Access Tokens* (ou *Settings → Access Tokens* de um
 projeto/grupo) com o escopo `read_api`. Para instalações próprias, configure `GITLAB_URL`.

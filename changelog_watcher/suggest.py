@@ -171,7 +171,7 @@ async def _artifacthub(client: httpx.AsyncClient, chart: str) -> list[dict]:
 
 
 async def _github_search(client: httpx.AsyncClient, settings, term: str) -> list[dict]:
-    resp = await get_json(client, "https://api.github.com/search/repositories", headers=github_headers(settings),
+    resp = await get_json(client, "https://api.github.com/search/repositories", headers=github_headers(settings, "https://api.github.com"),
                           params={"q": f"{term} in:name", "sort": "stars", "order": "desc", "per_page": 20})
     # Only repos named exactly like the term (argocd ~ argo-cd): the rest is noise.
     norm = lambda s: re.sub(r"[-_.]", "", s.lower())  # noqa: E731

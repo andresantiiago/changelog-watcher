@@ -19,4 +19,12 @@ spec:
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      {{- if .Values.metrics.token }}
+      # O Secret precisa estar no namespace do ServiceMonitor (o do release, por padrão).
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "cw.secretName" . }}
+          key: METRICS_TOKEN
+      {{- end }}
 {{- end }}

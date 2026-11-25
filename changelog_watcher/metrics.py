@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from prometheus_client.core import GaugeMetricFamily
@@ -18,6 +17,7 @@ from .analysis import (
     load_projects,
     project_versions,
     summaries_by_environment,
+    version_matrix,
 )
 from .config import get_settings
 from .db import session_scope
@@ -132,16 +132,12 @@ class WatcherCollector(Collector):
         yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_avg, env_max, env_behind, env_age)
 
         # Drift between environments.
-        by_project = defaultdict(set)
-        for st in statuses:
-            if st.current_version:
-                by_project[st.project].add(st.current_version)
         mismatch = GaugeMetricFamily(P + "project_version_mismatch",
                                      "1 se a aplicação roda versões diferentes entre ambientes", labels=["project"])
         distinct = GaugeMetricFamily(P + "project_distinct_versions", "Versões distintas implantadas", labels=["project"])
-        for project, versions in by_project.items():
-            mismatch.add_metric([project], 1 if len(versions) > 1 else 0)
-            distinct.add_metric([project], len(versions))
+        for row in version_matrix(statuses):
+            mismatch.add_metric([row["project"]], int(row["drift"]))
+            distinct.add_metric([row["project"]], row["distinct_versions"])
         pair = GaugeMetricFamily(P + "environment_pair_different_apps",
                                  "Aplicações com versões diferentes entre dois ambientes",
                                  labels=["source_environment", "target_environment"])

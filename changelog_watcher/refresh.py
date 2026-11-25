@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from . import prometheus as prom
+from . import safehttp
 from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
@@ -93,10 +94,10 @@ async def refresh_project_releases(project_id: int, client: httpx.AsyncClient) -
             rel.title = item.title or rel.title
             rel.prerelease = item.prerelease
             rel.published_at = item.published_at or rel.published_at
-            rel.url = item.url or rel.url
+            # only http(s): the UI renders it as a link (javascript: from a crafted Helm index, GitLab...)
+            rel.url = next((u for u in (item.url, rel.url) if u and u.lower().startswith(("https://", "http://"))), None)
             if item.notes:
                 rel.notes = item.notes
-            rel.commit_sha = item.commit_sha or rel.commit_sha
         p.last_error = None
         p.last_checked_at = utcnow()
     return new
@@ -170,7 +171,7 @@ def store_snapshots() -> None:
             snap.updated_at = utcnow()
 
 
-async def run_refresh(project_ids: list[int] | None = None, fetch: bool = True, detect: bool = True) -> dict:
+async def run_refresh(project_ids: list[int] | None = None, detect: bool = True) -> dict:
     """Run a full (or partial) refresh. Concurrent calls wait for the running one."""
     if _LOCK.locked() and project_ids is None:
         return {**STATE.to_dict(), "message": "atualização já em andamento"}
@@ -188,31 +189,30 @@ async def run_refresh(project_ids: list[int] | None = None, fetch: bool = True, 
                 ok, failed, errors = await detect_versions(project_ids)
                 STATE.detections_ok, STATE.detections_failed = ok, failed
                 STATE.errors.extend(errors)
-            if fetch:
-                with session_scope() as s:
-                    stmt = select(Project.id).where(Project.enabled.is_(True))
-                    if project_ids:
-                        stmt = stmt.where(Project.id.in_(project_ids))
-                    ids = list(s.scalars(stmt))
-                sem = asyncio.Semaphore(6)
-                async with httpx.AsyncClient(
-                    timeout=settings.http_timeout,
-                    follow_redirects=True,
-                    headers={"User-Agent": "changelog-watcher"},
-                ) as client:
+            with session_scope() as s:
+                stmt = select(Project.id).where(Project.enabled.is_(True))
+                if project_ids:
+                    stmt = stmt.where(Project.id.in_(project_ids))
+                ids = list(s.scalars(stmt))
+            sem = asyncio.Semaphore(6)
+            async with safehttp.client(
+                timeout=settings.http_timeout,
+                follow_redirects=True,
+                headers={"User-Agent": "changelog-watcher"},
+            ) as client:
 
-                    async def one(pid: int):
-                        async with sem:
-                            try:
-                                n = await refresh_project_releases(pid, client)
-                                STATE.projects_ok += 1
-                                STATE.new_releases += n
-                            except Exception as exc:
-                                STATE.projects_failed += 1
-                                STATE.errors.append(str(exc))
-                                log.warning("release fetch failed: %s", exc)
+                async def one(pid: int):
+                    async with sem:
+                        try:
+                            n = await refresh_project_releases(pid, client)
+                            STATE.projects_ok += 1
+                            STATE.new_releases += n
+                        except Exception as exc:
+                            STATE.projects_failed += 1
+                            STATE.errors.append(str(exc))
+                            log.warning("release fetch failed: %s", exc)
 
-                    await asyncio.gather(*(one(pid) for pid in ids))
+                await asyncio.gather(*(one(pid) for pid in ids))
             store_snapshots()
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
             log.info("atualização concluída: %s projeto(s) ok, %s com erro, %s novas versões", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
