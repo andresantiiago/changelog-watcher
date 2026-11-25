@@ -48,3 +48,13 @@ async def get_json(client: httpx.AsyncClient, url: str, **kwargs):
         raise SourceError(f"acesso negado ({resp.status_code}) em {url}")
     resp.raise_for_status()
     return resp
+
+
+async def paged(client: httpx.AsyncClient, url: str, settings, headers: dict | None = None):
+    """Items of a page-numbered API (per_page=100), up to MAX_RELEASE_PAGES or the first short page."""
+    for page in range(1, settings.max_release_pages + 1):
+        items = (await get_json(client, url, params={"per_page": 100, "page": page}, headers=headers)).json()
+        for item in items:
+            yield item
+        if len(items) < 100:
+            return

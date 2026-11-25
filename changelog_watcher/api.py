@@ -500,7 +500,8 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
 
     w = _get(db, Webhook, hook_id)
     data = build_report_data(db)
-    result = await send_webhook(w, data, render_markdown(data))
+    async with httpx.AsyncClient(timeout=get_settings().http_timeout) as client:
+        result = await send_webhook(w, data, render_markdown(data), client)
     record_status(w, result, " (teste)")
     return result
 

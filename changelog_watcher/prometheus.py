@@ -104,24 +104,18 @@ def build_query(project, deployment, environment) -> str:
     raise PrometheusError("detecção via Prometheus desabilitada para esta aplicação")
 
 
-def _client_kwargs(environment) -> dict:
-    headers = {}
-    auth = None
-    if environment.prometheus_auth == "bearer" and environment.prometheus_token:
-        headers["Authorization"] = f"Bearer {expand_env(environment.prometheus_token)}"
-    elif environment.prometheus_auth == "basic" and environment.prometheus_username:
-        auth = (expand_env(environment.prometheus_username) or "", expand_env(environment.prometheus_password) or "")
-    return {"headers": headers, "auth": auth, "verify": environment.prometheus_verify_tls}
-
-
 async def instant_query(environment, promql: str, timeout: float = 15.0) -> list[dict]:
     if not environment.prometheus_url:
         raise PrometheusError(f"ambiente '{environment.name}' sem URL do Prometheus")
     url = expand_env(environment.prometheus_url).rstrip("/") + "/api/v1/query"
-    kw = _client_kwargs(environment)
+    headers, auth = {}, None
+    if environment.prometheus_auth == "bearer" and environment.prometheus_token:
+        headers["Authorization"] = f"Bearer {expand_env(environment.prometheus_token)}"
+    elif environment.prometheus_auth == "basic" and environment.prometheus_username:
+        auth = (expand_env(environment.prometheus_username) or "", expand_env(environment.prometheus_password) or "")
     try:
-        async with httpx.AsyncClient(timeout=timeout, verify=kw["verify"], auth=kw["auth"]) as client:
-            resp = await client.get(url, params={"query": promql}, headers=kw["headers"])
+        async with httpx.AsyncClient(timeout=timeout, verify=environment.prometheus_verify_tls, auth=auth) as client:
+            resp = await client.get(url, params={"query": promql}, headers=headers)
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         raise PrometheusError(f"falha ao consultar Prometheus: {exc}") from exc
     if resp.status_code >= 400:

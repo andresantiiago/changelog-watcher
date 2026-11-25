@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
-async def scheduled_report() -> dict:
+async def scheduled_report() -> None:
     """Refresh, build the weekly report and send it to every enabled webhook."""
     settings = get_settings()
     await run_refresh()
@@ -27,7 +27,6 @@ async def scheduled_report() -> dict:
         if settings.report_send_enabled:
             hooks = list(s.scalars(select(Webhook).where(Webhook.enabled.is_(True))))
             await deliver_report(s, report, hooks)
-        return {"report_id": report.id, "delivery": report.delivery}
 
 
 def effective_schedule() -> dict:
@@ -57,15 +56,14 @@ def _schedule_jobs() -> None:
              sch["refresh_interval_minutes"], sch["report_cron"], settings.timezone)
 
 
-def start_scheduler() -> AsyncIOScheduler | None:
+def start_scheduler() -> None:
     global _scheduler
     settings = get_settings()
     if not settings.scheduler_enabled:
-        return None
+        return
     _scheduler = AsyncIOScheduler(timezone=settings.timezone)
     _schedule_jobs()
     _scheduler.start()
-    return _scheduler
 
 
 def reschedule() -> None:

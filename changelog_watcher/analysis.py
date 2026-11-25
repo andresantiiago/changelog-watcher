@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import combinations
@@ -282,9 +282,8 @@ def version_matrix(statuses: list[DeploymentStatus]) -> list[dict]:
         }
     rows = sorted(by_project.values(), key=lambda r: r["project"].lower())
     for row in rows:
-        versions = {v["version"] for v in row["environments"].values() if v["version"]}
-        row["distinct_versions"] = len(versions)
-        row["drift"] = len(versions) > 1
+        row["distinct_versions"] = len({v["version"] for v in row["environments"].values() if v["version"]})
+        row["drift"] = row["distinct_versions"] > 1
     return rows
 
 
@@ -337,9 +336,7 @@ def compare_environments(
                 "latest_version": str(max(versions)) if versions else None,
             }
         )
-    counts = defaultdict(int)
-    for r in rows:
-        counts[r["relation"]] += 1
+    counts = Counter(r["relation"] for r in rows)
     return {"source_id": source_id, "target_id": target_id, "rows": rows, "counts": dict(counts)}
 
 
@@ -384,9 +381,7 @@ def recent_releases(session: Session, days: int = 7, now: datetime | None = None
     out = []
     for project in load_projects(session):
         versions = project_versions(project)
-        deployed = {}
-        for d in project.deployments:
-            deployed[d.environment.name] = d.current_version
+        deployed = {d.environment.name: d.current_version for d in project.deployments}
         for v, entry in versions.items():
             if entry.published_at and entry.published_at >= since:
                 item = release_dict(entry.release, v)

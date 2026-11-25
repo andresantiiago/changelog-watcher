@@ -5,7 +5,7 @@ import asyncio
 import httpx
 
 from ..versioning import parse_version
-from .base import ReleaseData, SourceError, get_json, parse_datetime
+from .base import ReleaseData, SourceError, get_json, paged, parse_datetime
 
 MAX_TAG_DATE_LOOKUPS = 25  # commits fetched to date unknown tags per run
 
@@ -34,31 +34,18 @@ def _repo(project) -> str:
 
 async def fetch_releases(project, client: httpx.AsyncClient, settings) -> list[ReleaseData]:
     api, repo = _api(project, settings), _repo(project)
-    out: list[ReleaseData] = []
-    for page in range(1, settings.max_release_pages + 1):
-        resp = await get_json(
-            client,
-            f"{api}/repos/{repo}/releases",
-            params={"per_page": 100, "page": page},
-            headers=_headers(settings),
+    return [
+        ReleaseData(
+            tag=item["tag_name"],
+            published_at=parse_datetime(item.get("published_at") or item.get("created_at")),
+            title=item.get("name") or item["tag_name"],
+            notes=item.get("body") or "",
+            url=item.get("html_url"),
+            prerelease=bool(item.get("prerelease")),
         )
-        items = resp.json()
-        for item in items:
-            if item.get("draft"):
-                continue
-            out.append(
-                ReleaseData(
-                    tag=item["tag_name"],
-                    published_at=parse_datetime(item.get("published_at") or item.get("created_at")),
-                    title=item.get("name") or item["tag_name"],
-                    notes=item.get("body") or "",
-                    url=item.get("html_url"),
-                    prerelease=bool(item.get("prerelease")),
-                )
-            )
-        if len(items) < 100:
-            break
-    return out
+        async for item in paged(client, f"{api}/repos/{repo}/releases", settings, _headers(settings))
+        if not item.get("draft")
+    ]
 
 
 async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: dict | None = None) -> list[ReleaseData]:
@@ -66,27 +53,15 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: 
     newest tags we don't know yet (bounded by MAX_TAG_DATE_LOOKUPS)."""
     api, repo = _api(project, settings), _repo(project)
     known_dates = known_dates or {}
-    tags: list[ReleaseData] = []
-    for page in range(1, settings.max_release_pages + 1):
-        resp = await get_json(
-            client,
-            f"{api}/repos/{repo}/tags",
-            params={"per_page": 100, "page": page},
-            headers=_headers(settings),
+    tags = [
+        ReleaseData(
+            tag=item["name"],
+            url=f"https://github.com/{repo}/releases/tag/{item['name']}",
+            commit_sha=(item.get("commit") or {}).get("sha"),
+            published_at=known_dates.get(item["name"]),
         )
-        items = resp.json()
-        for item in items:
-            sha = (item.get("commit") or {}).get("sha")
-            tags.append(
-                ReleaseData(
-                    tag=item["name"],
-                    url=f"https://github.com/{repo}/releases/tag/{item['name']}",
-                    commit_sha=sha,
-                    published_at=known_dates.get(item["name"]),
-                )
-            )
-        if len(items) < 100:
-            break
+        async for item in paged(client, f"{api}/repos/{repo}/tags", settings, _headers(settings))
+    ]
 
     missing = [t for t in tags if t.published_at is None and t.commit_sha]
     missing.sort(key=lambda t: parse_version(t.tag, project.tag_pattern) or parse_version("0.0.0"), reverse=True)
