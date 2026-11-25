@@ -1,5 +1,7 @@
 import asyncio
 
+import httpx
+
 from changelog_watcher.models import Webhook
 from changelog_watcher.webhooks import build_payloads, filter_data, send_webhook
 
@@ -23,7 +25,11 @@ def test_filter_data_drift_ignores_unknown_versions():
 
 def test_send_webhook_invalid_url_is_reported_not_raised():
     hook = Webhook(name="h", kind="generic", url="http://[::1/x", enabled=True, only_outdated=False, environment_ids=[])
-    r = asyncio.run(send_webhook(hook, _data(), "md"))
+    async def run():
+        async with httpx.AsyncClient() as client:
+            return await send_webhook(hook, _data(), "md", client)
+
+    r = asyncio.run(run())
     assert r["ok"] is False and r["detail"]
 
 

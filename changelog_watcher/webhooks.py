@@ -93,8 +93,7 @@ def to_slack(text: str) -> str:
 
 def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
     if kind == "slack":
-        text = to_slack("\n".join(chat_lines(data)))
-        return [{"text": text, "mrkdwn": True}]
+        return [{"text": to_slack("\n".join(chat_lines(data))), "mrkdwn": True}]
     if kind == "google_chat":
         return [{"text": to_slack("\n".join(chat_lines(data)))}]
     if kind == "discord":
@@ -127,7 +126,7 @@ def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
     return [{"event": "changelog_watcher.report", "markdown": markdown, "report": data}]
 
 
-async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: httpx.AsyncClient | None = None) -> dict:
+async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: httpx.AsyncClient) -> dict:
     data = filter_data(data, webhook.environment_ids)
     if webhook.only_outdated and not any(o["status"] != "unknown" for o in data["outdated"]):
         return {"webhook": webhook.name, "ok": True, "skipped": True, "detail": "nada desatualizado"}
@@ -139,8 +138,6 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
     if webhook.environment_ids:
         markdown = render_markdown(data)
     payloads = build_payloads(webhook.kind, data, markdown)
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=get_settings().http_timeout)
     try:
         for payload in payloads:
             resp = await client.post(url, json=payload)
@@ -149,9 +146,6 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
         return {"webhook": webhook.name, "ok": True, "detail": f"{len(payloads)} mensagem(ns) enviada(s)"}
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         return {"webhook": webhook.name, "ok": False, "detail": str(exc)}
-    finally:
-        if own:
-            await client.aclose()
 
 
 def record_status(webhook: Webhook, result: dict, suffix: str = "") -> None:

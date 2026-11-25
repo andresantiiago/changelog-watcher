@@ -40,7 +40,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        e = os.environ.get
+        e = os.environ.get  # empty counts as unset: Helm renders a null value as ""
         return cls(
             database_url=e("DATABASE_URL", cls.database_url),
             config_file=e("CONFIG_FILE") or None,
@@ -49,20 +49,20 @@ class Settings:
             github_api_url=e("GITHUB_API_URL", cls.github_api_url).rstrip("/"),
             gitlab_token=e("GITLAB_TOKEN") or None,
             gitlab_url=e("GITLAB_URL", cls.gitlab_url).rstrip("/"),
-            http_timeout=float(e("HTTP_TIMEOUT", "20")),
-            max_release_pages=int(e("MAX_RELEASE_PAGES", "3")),
-            refresh_interval_minutes=int(e("REFRESH_INTERVAL_MINUTES", "360")),
-            refresh_on_startup=_bool(e("REFRESH_ON_STARTUP"), True),
+            http_timeout=float(e("HTTP_TIMEOUT") or cls.http_timeout),
+            max_release_pages=int(e("MAX_RELEASE_PAGES") or cls.max_release_pages),
+            refresh_interval_minutes=int(e("REFRESH_INTERVAL_MINUTES") or cls.refresh_interval_minutes),
+            refresh_on_startup=_bool(e("REFRESH_ON_STARTUP"), cls.refresh_on_startup),
             report_cron=e("REPORT_CRON", cls.report_cron),
-            report_days=int(e("REPORT_DAYS", "7")),
-            report_send_enabled=_bool(e("REPORT_SEND_ENABLED"), True),
-            timezone=e("TZ", "UTC") or "UTC",
+            report_days=int(e("REPORT_DAYS") or cls.report_days),
+            report_send_enabled=_bool(e("REPORT_SEND_ENABLED"), cls.report_send_enabled),
+            timezone=e("TZ") or cls.timezone,
             public_url=(e("PUBLIC_URL", "") or "").rstrip("/"),
             auth_username=e("AUTH_USERNAME") or None,
             auth_password=e("AUTH_PASSWORD") or None,
-            scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), True),
-            metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS", "30")),
-            log_level=e("LOG_LEVEL", "INFO"),
+            scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), cls.scheduler_enabled),
+            metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS") or cls.metrics_cache_seconds),
+            log_level=e("LOG_LEVEL") or cls.log_level,
         )
 
 
