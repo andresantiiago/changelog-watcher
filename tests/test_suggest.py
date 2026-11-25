@@ -53,3 +53,41 @@ def test_suggest_source_failures_are_skipped(client):
         mock.get(host="api.github.com").mock(return_value=httpx.Response(403, headers={"x-ratelimit-remaining": "0"}))
         r = client.get("/api/suggest-source", params={"image": "ghcr.io/stefanprodan/podinfo:6.7.1"})
     assert [(c["source_type"], c["repository"]) for c in r.json()["candidates"]] == [("github_releases", "stefanprodan/podinfo")]
+
+
+def test_suggest_source_by_digest_skips_attestations(client):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(host="testserver").pass_through()
+        mock.get(host="api.github.com").mock(return_value=httpx.Response(200, json={"items": []}))
+        mock.get(host="artifacthub.io").mock(return_value=httpx.Response(200, json={"packages": []}))
+        q = "https://quay.io/v2/org/app"
+        mock.get(f"{q}/manifests/sha256:idx").mock(return_value=httpx.Response(200, json={"manifests": [
+            {"digest": "sha256:att", "platform": {"os": "unknown", "architecture": "unknown"}},
+            {"digest": "sha256:arm", "platform": {"os": "linux", "architecture": "arm64"}},
+        ]}))
+        mock.get(f"{q}/manifests/sha256:arm").mock(return_value=httpx.Response(200, json={"config": {"digest": "sha256:cfg"}}))
+        mock.get(f"{q}/blobs/sha256:cfg").mock(return_value=httpx.Response(200, json={"config": {"Labels": {
+            "org.opencontainers.image.source": "https://github.com/org/app"}}}))
+        r = client.get("/api/suggest-source", params={"image": "quay.io/org/app:1.0@sha256:idx"})
+    assert r.json()["candidates"][0]["repository"] == "org/app"
+
+
+def test_suggest_source_only_public_registries(client):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(host="testserver").pass_through()
+        mock.get(host="api.github.com").mock(return_value=httpx.Response(200, json={"items": []}))
+        mock.get(host="artifacthub.io").mock(return_value=httpx.Response(200, json={"packages": []}))
+        internal = mock.get(host="10.0.0.5").mock(return_value=httpx.Response(200, json={}))
+        metadata = mock.get(host="169.254.169.254").mock(return_value=httpx.Response(200, json={"token": "x"}))
+        mock.get(host="ghcr.io").mock(return_value=httpx.Response(
+            401, headers={"www-authenticate": 'Bearer realm="https://169.254.169.254/token"'}))
+        client.get("/api/suggest-source", params={"image": "10.0.0.5:5000/org/app:1"})
+        client.get("/api/suggest-source", params={"image": "ghcr.io/org/app:1"})
+    assert not internal.called and not metadata.called  # registry fora da lista e realm de outro domínio
+
+
+def test_chart_name():
+    from changelog_watcher.suggest import chart_name
+    assert chart_name("argo-cd-5.46.7") == "argo-cd"
+    assert chart_name("app-1.2.3-rc.1") == "app"
+    assert chart_name("k8s-1.2.0-exporter-0.3.1") == "k8s-1.2.0-exporter"  # só o último -X.Y.Z é versão

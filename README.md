@@ -94,8 +94,10 @@ Sem repositório informado, o formulário **sugere as fontes mais prováveis** (
 **sugerir fonte**, automático ao vir da descoberta). Clique numa delas para preencher o
 formulário. As sugestões vêm, nesta ordem, de:
 
-1. label `org.opencontainers.image.source` da imagem, lido do registry com pull anônimo
-   (Docker Hub, ghcr.io, quay.io…): o repositório oficial, quando a imagem o publica;
+1. label `org.opencontainers.image.source` da imagem, lido do registry com pull anônimo:
+   o repositório oficial, quando a imagem o publica. Só registries públicos são consultados
+   (Docker Hub, ghcr.io, quay.io, gcr.io, registry.k8s.io, public.ecr.aws, mcr.microsoft.com,
+   registry.gitlab.com, docker.elastic.co), para a API não acessar hosts da rede interna;
 2. imagem no `ghcr.io` → repositório GitHub de mesmo nome;
 3. [Artifact Hub](https://artifacthub.io): repositórios Helm com um chart de mesmo nome
    (do label `helm.sh/chart` ou do nome da aplicação), comparando pelo `appVersion`;
@@ -103,8 +105,8 @@ formulário. As sugestões vêm, nesta ordem, de:
 5. busca no GitHub por repositórios com o mesmo nome, por estrelas (use `GITHUB_TOKEN`
    para não esbarrar no limite de 10 buscas/min sem autenticação).
 
-Cada consulta é independente: se uma falhar (sem internet, imagem privada, limite da
-API), só aparecem menos sugestões. A API é `GET /api/suggest-source?name=&image=&chart=`.
+Cada consulta é independente e tem até 15 s: se uma falhar (sem internet, imagem privada,
+limite da API), só aparecem menos sugestões, e a falha fica nos logs (WARNING). A API é `GET /api/suggest-source?name=&image=&chart=`.
 
 ## Executando
 

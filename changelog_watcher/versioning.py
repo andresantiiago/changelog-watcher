@@ -205,6 +205,11 @@ def image_tag(image: str | None) -> str | None:
     return last.rsplit(":", 1)[1] or None
 
 
+def ghcr_repository(repo: str) -> str:
+    """"ghcr.io/org/app" -> "org/app" (o repositório GitHub da imagem); senão vazio."""
+    return repo.removeprefix("ghcr.io/") if repo.startswith("ghcr.io/") and repo.count("/") == 2 else ""
+
+
 def image_repository(image: str | None) -> str | None:
     if not image:
         return None

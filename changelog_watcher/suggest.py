@@ -9,12 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from urllib.parse import urlsplit
 
 import httpx
 
 from .sources.base import get_json
 from .sources.github import _headers as github_headers
-from .versioning import image_repository, image_tag
+from .versioning import ghcr_repository, image_repository, image_tag
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,12 @@ _MANIFEST_TYPES = ", ".join((
     "application/vnd.oci.image.manifest.v1+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 ))
-_REPO_URL = re.compile(r"^(?:https?://|git@)(github\.com|gitlab\.com)[/:]([\w.-]+(?:/[\w.-]+)+)$")
+_REPO_URL = re.compile(r"^https?://(github\.com|gitlab\.com)/([\w.-]+(?:/[\w.-]+)+)$")
+# ponytail: só registries públicos, para a API não servir de proxy para a rede interna (SSRF);
+# uma setting com registries extras se registries privados com acesso anônimo fizerem falta.
+_REGISTRIES = {"registry-1.docker.io", "ghcr.io", "quay.io", "gcr.io", "registry.k8s.io", "public.ecr.aws",
+               "mcr.microsoft.com", "registry.gitlab.com", "docker.elastic.co"}
+_LOOKUP_TIMEOUT = 15.0  # s por consulta (a da imagem faz até 5 requisições em sequência)
 
 
 def _candidate(source_type: str, repository: str, reason: str, **extra) -> dict:
@@ -43,8 +49,8 @@ def _from_repo_url(url: str, reason: str) -> dict | None:
 
 
 def chart_name(chart: str | None) -> str | None:
-    """helm.sh/chart label "argo-cd-5.46.7" -> "argo-cd"."""
-    return re.sub(r"-v?\d+\.\d+.*$", "", chart) if chart else None
+    """helm.sh/chart label "argo-cd-5.46.7" -> "argo-cd" (a versão é o último -X.Y.Z)."""
+    return re.sub(r"^(.*)-v?\d+\.\d+\.\d+\S*$", r"\1", chart) if chart else None
 
 
 def _registry(image: str) -> tuple[str, str]:
@@ -61,6 +67,9 @@ def _registry(image: str) -> tuple[str, str]:
 async def _image_source(client: httpx.AsyncClient, image: str) -> dict | None:
     """Read the org.opencontainers.image.source label of the image config (anonymous pull)."""
     host, repo = _registry(image)
+    if host not in _REGISTRIES:
+        return None
+    domain = ".".join(host.split(".")[-2:])  # registry-1.docker.io -> docker.io
     base = f"https://{host}/v2/{repo}"
     headers = {"Accept": _MANIFEST_TYPES}
 
@@ -69,17 +78,19 @@ async def _image_source(client: httpx.AsyncClient, image: str) -> dict | None:
         if resp.status_code == 401 and "Authorization" not in headers:
             # Bearer realm="https://auth.docker.io/token",service="...",scope="..."
             params = dict(re.findall(r'(\w+)="([^"]*)"', resp.headers.get("www-authenticate", "")))
-            realm = params.pop("realm", None)
-            if not realm:
-                resp.raise_for_status()
-            token = (await client.get(realm, params=params)).raise_for_status().json()
+            realm = urlsplit(params.pop("realm", ""))
+            realm_host = realm.hostname or ""
+            if realm.scheme != "https" or not (realm_host == domain or realm_host.endswith(f".{domain}")):
+                resp.raise_for_status()  # token só no domínio do próprio registry
+            token = (await client.get(realm.geturl(), params=params)).raise_for_status().json()
             headers["Authorization"] = f"Bearer {token.get('token') or token.get('access_token')}"
             resp = await client.get(url, headers=headers)
         return resp.raise_for_status()
 
-    manifest = (await get(f"{base}/manifests/{image_tag(image) or 'latest'}")).json()
+    ref = image.partition("@")[2] or image_tag(image) or "latest"
+    manifest = (await get(f"{base}/manifests/{ref}")).json()
     if "manifests" in manifest:  # multi-arch index: any platform carries the same labels
-        items = manifest["manifests"]
+        items = [m for m in manifest["manifests"] if m.get("platform", {}).get("os") != "unknown"]  # sem attestations
         pick = next((m for m in items if m.get("platform", {}).get("architecture") == "amd64"), items[0])
         manifest = (await get(f"{base}/manifests/{pick['digest']}")).json()
     config = (await get(f"{base}/blobs/{manifest['config']['digest']}")).json()
@@ -109,17 +120,6 @@ async def _github_search(client: httpx.AsyncClient, settings, term: str) -> list
             for r in hits[:3]]
 
 
-async def _safe(coro) -> object:
-    """Best effort: a failed lookup just yields no candidate."""
-    if coro is None:
-        return None
-    try:
-        return await coro
-    except Exception as exc:  # noqa: BLE001 – network, rate limit, private image, unexpected payload
-        log.debug("sugestão de fonte falhou: %r", exc)
-        return None
-
-
 async def suggest_sources(client: httpx.AsyncClient, settings, name: str | None = None,
                           image: str | None = None, chart: str | None = None) -> list[dict]:
     image = (image or "").strip() or None
@@ -128,13 +128,18 @@ async def suggest_sources(client: httpx.AsyncClient, settings, name: str | None 
     repo = image_repository(image) if image else None
     term = chart_name((chart or "").strip()) or (name or "").strip() or (repo.rsplit("/", 1)[-1] if repo else None)
 
-    label, charts, repos = await asyncio.gather(
-        _safe(_image_source(client, image) if image else None),
-        _safe(_artifacthub(client, term) if term else None),
-        _safe(_github_search(client, settings, term) if term else None),
-    )
-    ghcr = [_candidate("github_releases", repo.removeprefix("ghcr.io/"), "imagem no ghcr.io")] \
-        if repo and repo.startswith("ghcr.io/") and repo.count("/") == 2 else []
+    # asyncio.sleep(0): consulta sem dado de entrada, resultado None.
+    lookups = [_image_source(client, image) if image else asyncio.sleep(0),
+               _artifacthub(client, term) if term else asyncio.sleep(0),
+               _github_search(client, settings, term) if term else asyncio.sleep(0)]
+    # Best effort: rede, rate limit, imagem privada ou payload inesperado só tiram candidatos.
+    results = await asyncio.gather(*(asyncio.wait_for(c, _LOOKUP_TIMEOUT) for c in lookups), return_exceptions=True)
+    for r in results:
+        if isinstance(r, Exception):
+            log.warning("Sugestão de fonte: consulta falhou: %r", r)
+    label, charts, repos = [None if isinstance(r, Exception) else r for r in results]
+    gh = ghcr_repository(repo or "")
+    ghcr = [_candidate("github_releases", gh, "imagem no ghcr.io")] if gh else []
     host, path = _registry(image) if image else ("", "")
     hub = [_candidate("dockerhub", path.removeprefix("library/"), "imagem no Docker Hub")] \
         if host == "registry-1.docker.io" else []
