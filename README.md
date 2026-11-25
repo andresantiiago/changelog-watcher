@@ -88,8 +88,36 @@ os workloads agrupados por release:
 repositório GitHub/GitLab, CHANGELOG, repositório Helm ou a URL de uma **página
 web** (fonte `webpage`: toda versão encontrada no texto vira uma release; use o
 **padrão de tag** para ignorar versões de outros softwares citadas na página e a
-**URL do CHANGELOG** para trazer notas e datas). Imagens do `ghcr.io` já sugerem o
-repositório GitHub.
+**URL do CHANGELOG** para trazer notas e datas).
+
+Sem repositório informado, o formulário **sugere as fontes mais prováveis** (o link
+**sugerir fonte**, automático ao vir da descoberta). Clique numa delas para preencher o
+formulário. As sugestões vêm, nesta ordem, de:
+
+1. label `org.opencontainers.image.source` da imagem, lido do registry com pull anônimo:
+   o repositório oficial, quando a imagem o publica. Só registries públicos são consultados
+   (Docker Hub, ghcr.io, quay.io, gcr.io, registry.k8s.io, public.ecr.aws, mcr.microsoft.com,
+   registry.gitlab.com, docker.elastic.co), para a API não acessar hosts da rede interna;
+2. imagem de registry interno (ex.: `registry.intranet/nginx:1.30.0`): procura a imagem pública
+   da qual ela é mirror, com a mesma tag (ou digest), e usa o label dela ou a imagem do Docker
+   Hub. Tenta, nesta ordem: o registry original quando ele está no caminho
+   (`harbor.corp/proxy/quay.io/org/app` → `quay.io/org/app`), `ghcr.io` e Docker Hub com os
+   dois últimos segmentos do caminho, e as imagens do Docker Hub com o mesmo nome que sejam
+   oficiais ou tenham ao menos 100 mil pulls;
+3. imagem no `ghcr.io` → repositório GitHub de mesmo nome;
+4. [Artifact Hub](https://artifacthub.io): repositórios Helm com um chart de mesmo nome,
+   comparando pelo `appVersion` (oficiais ou com ao menos 5 estrelas);
+5. imagem no Docker Hub (fonte `dockerhub`);
+6. busca no GitHub por repositórios com o mesmo nome e ao menos 50 estrelas, por estrelas (use
+   `GITHUB_TOKEN` para não esbarrar no limite de 10 buscas/min sem autenticação).
+
+Artifact Hub e GitHub são buscados pelo nome do chart (label `helm.sh/chart`), pelo nome da
+imagem e pelo nome da aplicação, nesta ordem: o nome da imagem diz o que roda mesmo quando o
+workload tem outro nome (`frontend` rodando `nginx`).
+
+Cada consulta é independente e tem até 15 s: se uma falhar (sem internet, imagem privada,
+limite da API), só aparecem menos sugestões, e a falha fica nos logs (WARNING). A API é
+`GET /api/suggest-source?name=&image=&chart=`.
 
 ## Executando
 

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import expand_env
-from .versioning import image_repository, image_tag, parse_version
+from .versioning import ghcr_repository, image_repository, image_tag, parse_version
 
 
 class PrometheusError(RuntimeError):
@@ -219,7 +219,7 @@ def _suggest(group: dict) -> dict:
             out = {"name": w["name"], "detection_mode": "image", "image_pattern": repo}
     # Only ghcr.io maps reliably to a GitHub repo; otherwise the user points to the
     # repository or release page (no Docker Hub guess).
-    gh = repo.removeprefix("ghcr.io/") if repo.startswith("ghcr.io/") and repo.count("/") == 2 else ""
+    gh = ghcr_repository(repo)
     return {**out, "workload_namespace": group["namespace"], "source_type": "github_releases", "repository": gh}
 
 
