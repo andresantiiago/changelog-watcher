@@ -13,6 +13,8 @@ from changelog_watcher.versioning import classify, image_repository, image_tag, 
     ("v2.0.0-beta2", "2.0.0-beta.2"),
     ("1.2.3.4", "1.2.3.4"),
     ("v12", "12.0.0"),
+    ("0", "0.0.0"),
+    ("22.04", "22.4.0"),  # zero à esquerda com ponto é legítimo (Ubuntu)
 ])
 def test_parse(text, expected):
     assert str(parse_version(text)) == expected
@@ -21,6 +23,7 @@ def test_parse(text, expected):
 def test_parse_invalid_and_pattern():
     assert parse_version("latest") is None
     assert parse_version("") is None
+    assert parse_version("v011") is None and parse_version("007") is None  # contador do CoreDNS, não major
     assert str(parse_version("helm-chart-1.0.0", r"^helm-chart-(.*)$")) == "1.0.0"
     assert parse_version("app-1.0.0", r"^helm-chart-(.*)$") is None
     assert str(parse_version("x-v2.3.4", r"x-v(?P<version>.+)")) == "2.3.4"

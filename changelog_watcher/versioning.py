@@ -112,7 +112,9 @@ def _parse(text: str | None, pattern: str | None) -> Version | None:
     m = _VERSION_RE.search(candidate)
     if not m:
         # Allow plain "v12" / "12" style versions only when nothing else matched.
-        single = re.fullmatch(r"[vV]?(\d+)", candidate)
+        # Zero-padded ("v011", "007", CoreDNS 2016) is a build counter, not a major. Only here:
+        # dotted versions may legitimately pad (Ubuntu 22.04, 2024.01.15).
+        single = re.fullmatch(r"[vV]?([1-9]\d*|0)", candidate)
         if single:
             return Version(int(single.group(1)), 0, 0, raw=text)
         return None
