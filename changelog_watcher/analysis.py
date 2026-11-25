@@ -28,6 +28,8 @@ AGE_BUCKETS = [
     ("180-365d", 180, 365),
     (">1 ano", 365, None),
 ]
+# ponytail: limite fixo; vira setting se algum projeto precisar de outro valor.
+STALE_AFTER = timedelta(days=730)
 
 
 def pv(project: Project, text: str | None, use_pattern: bool = False) -> Version | None:
@@ -71,7 +73,28 @@ def project_versions(project: Project, releases: list[Release] | None = None) ->
             bool(a.notes) == bool(b.notes) and b.published_at and (not a.published_at or _aware(b.published_at) < _aware(a.published_at))
         ):
             out[v] = VersionEntry(v, rel)
-    return out
+    return _drop_stale(out)
+
+
+def _drop_stale(versions: dict[Version, VersionEntry]) -> dict[Version, VersionEntry]:
+    """Drop versions whose whole "line and above" is much older than some lower version.
+
+    CoreDNS has 11.0.0 from 2016 while the current line is 1.15 (2026): every version >= 11.0.0
+    is ~10 years older than 1.15.0, so 11.0.0 is not an update. A maintained older line
+    (PostgreSQL 13.x patched after 14.0) is kept, since higher versions (17, 18) are recent.
+    """
+    dated = sorted((v, e.published_at) for v, e in versions.items() if e.published_at)
+    newest_below, below = [], None  # newest_below[i]: newest date among versions lower than dated[i]
+    for _, d in dated:
+        newest_below.append(below)
+        below = d if below is None else max(below, d)
+    stale, above = set(), None  # above: newest date among versions >= dated[i]
+    for i in reversed(range(len(dated))):
+        v, d = dated[i]
+        above = d if above is None else max(above, d)
+        if newest_below[i] and above < newest_below[i] - STALE_AFTER:
+            stale.add(v)
+    return {v: e for v, e in versions.items() if v not in stale}
 
 
 @dataclass

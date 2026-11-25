@@ -38,12 +38,20 @@ publicadas (pre-releases ignoradas, a menos que habilitado) e calcula:
 | **atrasada há** | dias desde a publicação da primeira versão mais nova que a em uso | 200 dias |
 | **libyears** | anos entre a publicação da versão em uso e a da mais recente ([libyear](https://libyear.com)) | 1,1 |
 
+Versões maiores muito mais antigas que outra menor são ignoradas (em todo lugar: status,
+métricas, comparação entre ambientes e lista de versões): uma versão sai quando todas as versões
+iguais ou maiores que ela foram publicadas mais de 2 anos antes de alguma versão menor. Ex.: o
+CoreDNS tem a tag `11.0.0` de 2016, enquanto a linha atual é a 1.15 (2026); ela não aparece como
+major. Linhas antigas ainda mantidas (PostgreSQL 13 com patches depois do 14.0) continuam valendo,
+porque há versões maiores recentes.
+
 O status é exclusivo (cada implantação conta uma vez, pelo maior salto), mas o
 dashboard também mostra quantas implantações têm *algum* bugfix/minor/major
 pendente — uma app em `major` pode ter também um bugfix na sua linha.
 
 Tags como `v1.2.3`, `release-1.2.3`, `chart-1.2.3` e imagens como
-`1.25.3-alpine` são normalizadas. Use **padrão de tag** (regex) para filtrar
+`1.25.3-alpine` são normalizadas. Número único com zero à esquerda (`v011`, `007`) não é
+versão: é contador de build (as tags de 2016 do CoreDNS) e seria lido como major 11. Use **padrão de tag** (regex) para filtrar
 tags de monorepos e **esquema de versão `major.bugfix`** para projetos como o
 PostgreSQL, em que `16.2 → 16.9` é bugfix.
 
