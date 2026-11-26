@@ -2,6 +2,11 @@
 
 🇺🇸 English · 🇧🇷 [Português](README.pt-BR.md)
 
+> [!NOTE]
+> **Built entirely by AI.** Changelog Watcher was created entirely by an AI, [Claude](https://claude.ai)
+> (Anthropic): code, tests, Helm chart, Grafana dashboard and documentation. Keep that in mind
+> when using it, and review it before running it in production.
+
 Tracks the changelogs/releases of a list of applications, compares them with the version
 running in each environment and tells you what needs updating.
 
