@@ -127,6 +127,13 @@ class DeploymentStatus:
     project_error: str | None = None
     tags: list = field(default_factory=list)
     namespace: str | None = None
+    # End of life of the running version's release cycle (endoflife.date); see eol.deployment_eol.
+    eol_product: str | None = None
+    eol_cycle: str | None = None
+    eol_cycle_latest: str | None = None
+    eol_date: str | None = None
+    eol_days_left: int | None = None
+    eol_status: str | None = None  # ok|soon|eol
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -194,6 +201,10 @@ def deployment_status(
             st.libyears = round(max((latest_date - cur_entry.published_at).days, 0) / 365.25, 3)
     elif info.status == STATUS_UP_TO_DATE:
         st.libyears = 0.0
+    from .eol import deployment_eol  # late: eol -> sources -> analysis
+
+    for key, value in deployment_eol(project, current, now).items():
+        setattr(st, key, value)
     return st
 
 
@@ -252,6 +263,8 @@ def summarize(statuses: list[DeploymentStatus]) -> dict:
         "max_outdated_days": max(days) if days else 0.0,
         "versions_behind": sum(s.versions_behind for s in statuses),
         "age_buckets": buckets,
+        "eol_reached": sum(1 for s in statuses if s.eol_status == "eol"),
+        "eol_soon": sum(1 for s in statuses if s.eol_status == "soon"),
     }
 
 

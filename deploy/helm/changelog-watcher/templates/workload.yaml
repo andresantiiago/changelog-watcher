@@ -71,6 +71,14 @@ spec:
               value: {{ .Values.config.maxReleasePages | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
+            - name: EOL_ENABLED
+              value: {{ .Values.config.eol.enabled | quote }}
+            - name: EOL_API_URL
+              value: {{ .Values.config.eol.apiUrl | quote }}
+            - name: EOL_WARNING_DAYS
+              value: {{ .Values.config.eol.warningDays | quote }}
+            - name: EOL_AUTO_MATCH
+              value: {{ .Values.config.eol.autoMatch | quote }}
             - name: SEED_OVERWRITE
               value: {{ .Values.config.seedOverwrite | quote }}
             {{- if include "cw.hasSeed" . }}

@@ -6,6 +6,7 @@ os.environ.setdefault("SCHEDULER_ENABLED", "false")
 os.environ.setdefault("REFRESH_ON_STARTUP", "false")
 os.environ.setdefault("METRICS_CACHE_SECONDS", "0")
 os.environ.setdefault("AUTH_DISABLED", "true")
+os.environ.setdefault("EOL_ENABLED", "false")  # no calls to endoflife.date from refresh tests
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
