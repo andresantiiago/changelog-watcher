@@ -433,8 +433,8 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "Libyears",
-      "description": "Soma, em anos, do intervalo entre a versão em uso e a mais recente.",
+      "title": "Libyears médio",
+      "description": "Média, por implantação, do intervalo em anos entre a versão em uso e a mais recente.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -451,7 +451,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(changelog_watcher_environment_libyears_total{environment=~\"$environment\"})",
+          "expr": "avg(changelog_watcher_app_libyears{environment=~\"$environment\"})",
           "refId": "A",
           "legendFormat": "__auto",
           "range": false,
@@ -473,7 +473,7 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 1
+          "decimals": 2
         },
         "overrides": []
       },
@@ -883,8 +883,8 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Libyears acumulados",
-      "description": "Quanto maior, mais antigo está o ambiente.",
+      "title": "Libyears médio",
+      "description": "Média de libyears por implantação. Quanto maior, mais antigo está o ambiente.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -901,7 +901,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "changelog_watcher_environment_libyears_total{environment=~\"$environment\"}",
+          "expr": "changelog_watcher_environment_libyears_avg{environment=~\"$environment\"}",
           "refId": "A",
           "legendFormat": "{{environment}}",
           "range": true,

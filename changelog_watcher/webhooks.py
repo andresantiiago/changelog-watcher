@@ -56,7 +56,7 @@ def chat_lines(data: dict, max_items: int = 25) -> list[str]:
             f"**{s['environment']}**: {_pct(s['up_to_date_ratio'])} atualizado · {s['total']} apps · pendentes: "
             f"🟡 {s['patch_pending']} bugfix · 🟠 {s['minor_pending']} minor · 🔴 {s['major_pending']} major"
             + (f" · ⚪ {c['unknown']} sem versão" if c["unknown"] else "")
-            + f" · {s['libyears']:.1f} libyears"
+            + (f" · {s['libyears_avg']:.2f} libyears em média" if s.get("libyears_avg") is not None else "")
         )
     releases = data["new_releases"]
     lines += ["", f"**Novas versões ({len(releases)})**"]

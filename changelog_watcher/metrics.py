@@ -120,6 +120,8 @@ class WatcherCollector(Collector):
                                       "Fração de aplicações atualizadas (desconsidera desconhecidas)", labels=["environment"])
         env_total = GaugeMetricFamily(P + "environment_apps_total", "Total de aplicações no ambiente", labels=["environment"])
         env_lib = GaugeMetricFamily(P + "environment_libyears_total", "Soma de libyears no ambiente", labels=["environment"])
+        env_lib_avg = GaugeMetricFamily(P + "environment_libyears_avg",
+                                        "Média de libyears por implantação no ambiente", labels=["environment"])
         env_avg = GaugeMetricFamily(P + "environment_outdated_days_avg", "Média de dias desatualizado", labels=["environment"])
         env_max = GaugeMetricFamily(P + "environment_outdated_days_max", "Maior atraso em dias", labels=["environment"])
         env_behind = GaugeMetricFamily(P + "environment_versions_behind_total", "Soma de versões atrás",
@@ -139,6 +141,8 @@ class WatcherCollector(Collector):
                 env_ratio.add_metric([env], summ["up_to_date_ratio"])
             env_total.add_metric([env], summ["total"])
             env_lib.add_metric([env], summ["libyears"])
+            if summ["libyears_avg"] is not None:
+                env_lib_avg.add_metric([env], summ["libyears_avg"])
             env_avg.add_metric([env], summ["avg_outdated_days"])
             env_max.add_metric([env], summ["max_outdated_days"])
             env_behind.add_metric([env], summ["versions_behind"])
@@ -146,7 +150,8 @@ class WatcherCollector(Collector):
             env_eol.add_metric([env, "eol"], summ["eol_reached"])
             for bucket, n in summ["age_buckets"].items():
                 env_age.add_metric([env, bucket], n)
-        yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_avg, env_max, env_behind, env_eol, env_age)
+        yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_lib_avg, env_avg, env_max, env_behind,
+                    env_eol, env_age)
 
         # Drift between environments.
         mismatch = GaugeMetricFamily(P + "project_version_mismatch",

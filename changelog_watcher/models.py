@@ -166,6 +166,7 @@ class Snapshot(Base):
     unknown: Mapped[int] = mapped_column(Integer, default=0)
     up_to_date_ratio: Mapped[float | None] = mapped_column(Float, default=None)
     libyears: Mapped[float] = mapped_column(Float, default=0.0)
+    libyears_avg: Mapped[float | None] = mapped_column(Float, default=None)
     avg_outdated_days: Mapped[float] = mapped_column(Float, default=0.0)
     max_outdated_days: Mapped[float] = mapped_column(Float, default=0.0)
     versions_behind: Mapped[int] = mapped_column(Integer, default=0)
@@ -174,7 +175,7 @@ class Snapshot(Base):
 
 # Summary metrics stored per snapshot (the keys of analysis.summarize / its "counts").
 SNAPSHOT_FIELDS = ("total", "up_to_date", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
-                   "avg_outdated_days", "max_outdated_days", "versions_behind")
+                   "libyears_avg", "avg_outdated_days", "max_outdated_days", "versions_behind")
 
 
 class Webhook(Base):

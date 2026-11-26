@@ -371,11 +371,17 @@ def history(days: int = 90, environment_id: list[int] | None = Query(None), db: 
     stmt = select(Snapshot, Environment.name).join(Environment).where(Snapshot.day >= since)
     if environment_id:
         stmt = stmt.where(Snapshot.environment_id.in_(environment_id))
-    return [
-        {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
-         **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
-        for snap, env_name in db.execute(stmt.order_by(Snapshot.day))
-    ]
+    out = []
+    for snap, env_name in db.execute(stmt.order_by(Snapshot.day)):
+        row = {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
+               **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
+        if row["libyears_avg"] is None:
+            # Snapshots from before libyears_avg existed: approximate it from the sum.
+            known = (snap.total or 0) - (snap.unknown or 0)
+            if known > 0 and snap.libyears is not None:
+                row["libyears_avg"] = round(snap.libyears / known, 3)
+        out.append(row)
+    return out
 
 
 @router.get("/matrix")

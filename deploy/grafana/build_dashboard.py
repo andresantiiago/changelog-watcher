@@ -148,8 +148,9 @@ def build() -> dict:
                        12, y, w=3, h=5, steps=[(None, "text"), (1, STATUS_COLORS["minor"])]))
     panels.append(stat("Major pendente", f'sum(changelog_watcher_environment_apps_pending{{{ENV}, type="major"}})',
                        15, y, w=3, h=5, steps=[(None, "text"), (1, STATUS_COLORS["major"])]))
-    panels.append(stat("Libyears", f"sum(changelog_watcher_environment_libyears_total{{{ENV}}})", 18, y, w=3, h=5,
-                       decimals=1, description="Soma, em anos, do intervalo entre a versão em uso e a mais recente."))
+    panels.append(stat("Libyears médio", f"avg(changelog_watcher_app_libyears{{{ENV}}})", 18, y, w=3, h=5,
+                       decimals=2, description="Média, por implantação, do intervalo em anos entre a versão em uso "
+                                               "e a mais recente."))
     panels.append(stat("Apps com versões divergentes", "sum(changelog_watcher_project_version_mismatch)",
                        21, y, w=3, h=5, steps=[(None, "text"), (1, STATUS_COLORS["minor"])],
                        description="Aplicações rodando versões diferentes entre os ambientes."))
@@ -194,9 +195,10 @@ def build() -> dict:
     panels.append(timeseries("% atualizado ao longo do tempo",
                              [target(f"changelog_watcher_environment_up_to_date_ratio{{{ENV}}}", "{{environment}}")],
                              0, y, unit="percentunit", max_=1))
-    panels.append(timeseries("Libyears acumulados",
-                             [target(f"changelog_watcher_environment_libyears_total{{{ENV}}}", "{{environment}}")],
-                             12, y, description="Quanto maior, mais antigo está o ambiente."))
+    panels.append(timeseries("Libyears médio",
+                             [target(f"changelog_watcher_environment_libyears_avg{{{ENV}}}", "{{environment}}")],
+                             12, y, description="Média de libyears por implantação. Quanto maior, mais antigo "
+                                                "está o ambiente."))
     y += 8
     panels.append(timeseries(
         "Implantações desatualizadas por tipo",
