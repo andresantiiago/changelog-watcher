@@ -15,6 +15,7 @@ import re
 
 import httpx
 
+from ..i18n import _
 from ..versioning import parse_version
 from .base import ReleaseData, SourceError, parse_datetime
 
@@ -85,11 +86,11 @@ async def fetch_changelog(project, client: httpx.AsyncClient, settings, use_patt
 
     url = project.changelog_url or project.repository
     if not url.startswith("http"):
-        raise SourceError("informe a URL do arquivo de changelog")
+        raise SourceError(_("enter the URL of the changelog file"))
     text = await fetch_file(url, client, settings)
     releases = parse_changelog(text, project.tag_pattern if use_pattern else None)
     if not releases:
-        raise SourceError("nenhuma versão encontrada no changelog")
+        raise SourceError(_("no version found in the changelog"))
     for r in releases:
         r.url = url
     return releases
@@ -105,7 +106,7 @@ async def fetch_page(project, client: httpx.AsyncClient, settings) -> list[Relea
 
     url = project.repository
     if not url.startswith("http"):
-        raise SourceError("informe a URL da página de releases")
+        raise SourceError(_("enter the URL of the releases page"))
     text = html.unescape(re.sub(r"<[^>]+>", " ", await fetch_file(url, client, settings)))
     if project.tag_pattern:
         tags = [m.group(0) for m in re.finditer(project.tag_pattern, text)]
@@ -114,5 +115,5 @@ async def fetch_page(project, client: httpx.AsyncClient, settings) -> list[Relea
     # ponytail: no publication dates (age metrics stay empty); add a date regex if pages need it.
     releases = [ReleaseData(tag=t, url=url) for t in dict.fromkeys(tags)]
     if not releases:
-        raise SourceError("nenhuma versão encontrada na página")
+        raise SourceError(_("no version found on the page"))
     return releases

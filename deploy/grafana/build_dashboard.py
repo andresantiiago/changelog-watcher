@@ -3,8 +3,10 @@
 
     python deploy/grafana/build_dashboard.py
 
-Writes ``deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`` (also
-importable directly in Grafana).
+Writes ``deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`` (English, the default)
+and ``changelog-watcher.pt-BR.json`` (Brazilian Portuguese), both importable directly in Grafana;
+the Helm chart picks one by ``config.language``. The panel texts below are written in pt-BR and
+``EN`` translates them (exact strings) for the English dashboard.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "deploy/helm/changelog-watcher/dashboards/changelog-watcher.json"
+OUT_PT = ROOT / "deploy/helm/changelog-watcher/dashboards/changelog-watcher.pt-BR.json"
 
 DS = {"type": "prometheus", "uid": "${datasource}"}
 ENV = 'environment=~"$environment"'
@@ -445,10 +448,93 @@ def build() -> dict:
     }
 
 
+# pt-BR panel text -> English (exact strings; dict keys and queries are never translated).
+EN = {
+    "Changelog Watcher – Atualizações de aplicações": "Changelog Watcher – Application updates",
+    "Versões em uso x versões disponíveis por ambiente (bugfix/minor/major), envelhecimento e divergências.": "Versions in use vs. available versions per environment (bugfix/minor/major), aging and drift.",
+    "Ambiente": "Environment",
+    "Aplicação": "Application",
+    "Visão geral": "Overview",
+    "% atualizado": "% up to date",
+    "Fração das implantações (com versão conhecida) que estão na versão mais recente.": "Share of deployments (with a known version) running the latest version.",
+    "Implantações monitoradas": "Monitored deployments",
+    "Bugfix pendente": "Bugfix pending",
+    "Implantações com versão de bugfix (mesmo major.minor) disponível.": "Deployments with a bugfix version (same major.minor) available.",
+    "Minor pendente": "Minor pending",
+    "Major pendente": "Major pending",
+    "Libyears médio": "Average libyears",
+    "Média, por implantação, do intervalo em anos entre a versão em uso e a mais recente.": "Average, per deployment, of the gap in years between the version in use and the latest.",
+    "Apps com versões divergentes": "Apps with divergent versions",
+    "Aplicações rodando versões diferentes entre os ambientes.": "Applications running different versions across environments.",
+    "Status por ambiente": "Status by environment",
+    "Maior atualização pendente de cada implantação.": "Largest pending update of each deployment.",
+    "Atualizado": "Up to date",
+    "Desconhecido": "Unknown",
+    "Há quanto tempo estão desatualizadas": "How long they have been outdated",
+    "Implantações desatualizadas por tempo desde a publicação da primeira versão mais nova.": "Outdated deployments by time since the first newer version was published.",
+    "Envelhecimento do ambiente": "Environment aging",
+    "% atualizado ao longo do tempo": "% up to date over time",
+    "Média de libyears por implantação. Quanto maior, mais antigo está o ambiente.": "Average libyears per deployment. The higher, the older the environment.",
+    "Implantações desatualizadas por tipo": "Outdated deployments by type",
+    "Atraso médio e máximo (dias)": "Average and maximum delay (days)",
+    "{{environment}} · média": "{{environment}} · average",
+    "{{environment}} · máximo": "{{environment}} · maximum",
+    "Versões por aplicação": "Versions by application",
+    "Versões em uso e atualizações disponíveis": "Versions in use and available updates",
+    "Atual": "Current",
+    "Mais recente": "Latest",
+    "Atrasada há (dias)": "Outdated for (days)",
+    "Versões atrás": "Versions behind",
+    "Origem": "Source",
+    "Comparação de versões entre ambientes": "Version comparison across environments",
+    "Uma coluna por ambiente. Use junto com o painel de divergências.": "One column per environment. Use it with the drift panel.",
+    "Divergências entre pares de ambientes": "Drift between environment pairs",
+    "Ambiente A": "Environment A",
+    "Ambiente B": "Environment B",
+    "Apps diferentes": "Different apps",
+    "Histórico de status por aplicação": "Status history by application",
+    "Fim de suporte (EOL)": "End of life (EOL)",
+    "EOL atingido": "EOL reached",
+    "Implantações cujo ciclo em uso já está sem suporte (endoflife.date).": "Deployments whose cycle in use is already unsupported (endoflife.date).",
+    "EOL próximo": "EOL soon",
+    "Implantações cujo ciclo em uso perde suporte dentro do prazo de aviso (EOL_WARNING_DAYS).": "Deployments whose cycle in use loses support within the warning period (EOL_WARNING_DAYS).",
+    "Fim de suporte do ciclo em uso": "End of life of the cycle in use",
+    "Ciclo de cada implantação segundo o endoflife.date e os dias até o fim do suporte (negativo: já passou).": "Cycle of each deployment according to endoflife.date and the days until its end of life (negative: already past).",
+    "Produto": "Product",
+    "Ciclo": "Cycle",
+    "Suporte": "Support",
+    "Dias até o EOL": "Days until EOL",
+    "Com suporte": "Supported",
+    "Novas versões e saúde da coleta": "New versions and collection health",
+    "Versões publicadas nos últimos 7 dias": "Versions published in the last 7 days",
+    "Novas (7d)": "New (7d)",
+    "Publicada em": "Published at",
+    "Falhas de coleta / detecção": "Collection / detection failures",
+    "Ambiente (detecção)": "Environment (detection)",
+    "Fonte (releases)": "Source (releases)",
+    "Nenhuma falha": "No failures",
+    "Última atualização": "Last refresh",
+    "Tempo desde o fim da última atualização.": "Time since the end of the last refresh.",
+    "Última atualização sem erros": "Last refresh without errors",
+    "Com erros": "With errors",
+    "Duração das atualizações": "Refresh duration",
+    "duração média": "average duration",
+}
+
+
+def translate(obj, table: dict[str, str]):
+    if isinstance(obj, dict):
+        return {k: translate(v, table) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [translate(v, table) for v in obj]
+    return table.get(obj, obj) if isinstance(obj, str) else obj
+
+
 def main() -> None:
-    text = json.dumps(build(), indent=2, ensure_ascii=False) + "\n"
-    OUT.write_text(text, encoding="utf-8")
-    print(f"wrote {OUT.relative_to(ROOT)}")
+    dash = build()
+    for path, data in ((OUT, translate(dash, EN)), (OUT_PT, dash)):
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"wrote {path.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

@@ -53,6 +53,8 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: APP_LANGUAGE
+              value: {{ .Values.config.language | default "en" | quote }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
             - name: PUBLIC_URL

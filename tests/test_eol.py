@@ -127,8 +127,8 @@ def test_refresh_and_outputs(respx_mock, client, seeded):
     with session_scope() as s:
         data = build_report_data(s)
     md = render_markdown(data)
-    assert "## Fim de suporte (EOL) (2)" in md and "postgresql 13" in md and "em 30 dias" in md
-    assert any("pg-old" in line and "há 20 dias" in line for line in chat_lines(data))
+    assert "## End of life (EOL) (2)" in md and "postgresql 13" in md and "in 30 days" in md
+    assert any("pg-old" in line and "20 days ago" in line for line in chat_lines(data))
     assert filter_data(data, [seeded["dev"]["id"]])["eol"] == []
 
     # a failed fetch keeps the previous cycles

@@ -1,3 +1,4 @@
+{{- if eq (include "cw.lang" .) "pt-BR" -}}
 Changelog Watcher instalado!
 
 {{- if eq .Values.persistence.type "pvc" }}
@@ -30,4 +31,39 @@ ATENÇÃO: networkPolicy.prometheus está ligada sem allowIngressFrom: o Ingress
 Métricas Prometheus: /metrics {{- if .Values.metrics.serviceMonitor.enabled }} (ServiceMonitor criado){{ end }}
 {{- if .Values.grafana.dashboard.enabled }}
 Dashboard do Grafana publicado no ConfigMap {{ include "cw.fullname" . }}-dashboard
+{{- end }}
+{{- else -}}
+Changelog Watcher installed!
+
+{{- if eq .Values.persistence.type "pvc" }}
+Database: SQLite on a PVC (StatefulSet) – data is kept when the pod restarts.
+{{- else }}
+WARNING: in-memory database (persistence.type=inMemory) – data is LOST when the pod restarts.
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+Open: {{ range .Values.ingress.hosts }}http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
+{{- else }}
+Open locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }} 8080:{{ .Values.service.port }}
+  then http://localhost:8080
+{{- end }}
+
+{{- if not .Values.auth.enabled }}
+WARNING: authentication is off (auth.enabled=false): anyone who reaches the service can change the configuration.
+{{- else if not (or .Values.auth.password .Values.auth.existingSecret) }}
+User: {{ .Values.auth.username }} – password generated in the Secret {{ include "cw.secretName" . }}:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "cw.secretName" . }} -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d
+{{- end }}
+
+{{- with .Values.networkPolicy.prometheus }}
+{{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
+WARNING: networkPolicy.prometheus is on without allowIngressFrom: the Ingress cannot reach the pod.
+{{- end }}
+{{- end }}
+
+Prometheus metrics: /metrics {{- if .Values.metrics.serviceMonitor.enabled }} (ServiceMonitor created){{ end }}
+{{- if .Values.grafana.dashboard.enabled }}
+Grafana dashboard published in the ConfigMap {{ include "cw.fullname" . }}-dashboard
+{{- end }}
 {{- end }}

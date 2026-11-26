@@ -6,15 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .i18n import _
 from .sources import SOURCE_TYPES
 from .webhooks import WEBHOOK_KINDS
 
 DETECTION_MODES = {
-    "none": "Sem detecção (versão manual)",
+    "none": "No detection (manual version)",
     "workload": "Workload (Deployment/StatefulSet/DaemonSet)",
-    "helm": "Release Helm (todos os workloads do release)",
-    "image": "Padrão de imagem",
-    "query": "Consulta PromQL personalizada",
+    "helm": "Helm release (all workloads of the release)",
+    "image": "Image pattern",
+    "query": "Custom PromQL query",
 }
 
 SourceType = Literal[tuple(SOURCE_TYPES)]  # type: ignore[valid-type]
@@ -32,7 +33,7 @@ def _check_regex(value: str | None) -> str | None:
         try:
             re.compile(value)
         except re.error as exc:
-            raise ValueError(f"regex inválida: {exc}") from exc
+            raise ValueError(_("invalid regex: {error}", error=exc)) from exc
     return value or None
 
 
@@ -110,7 +111,7 @@ class ProjectIn(BaseModel):
     def _eol_product(cls, value: str | None) -> str | None:
         value = (value or "").strip().lower()
         if value and not _EOL_SLUG.fullmatch(value):
-            raise ValueError("produto inválido: use o identificador do endoflife.date, ex: postgresql")
+            raise ValueError(_("invalid product: use the endoflife.date identifier, e.g. postgresql"))
         return value or None
 
 

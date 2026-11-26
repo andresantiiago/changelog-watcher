@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "cw.labels" . | nindent 4 }}
     {{- with .Values.metrics.prometheusRule.labels }}{{ toYaml . | nindent 4 }}{{- end }}
+{{- $pt := eq (include "cw.lang" .) "pt-BR" }}
 spec:
   groups:
     - name: changelog-watcher
@@ -16,7 +17,7 @@ spec:
           labels:
             severity: info
           annotations:
-            summary: "{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) tem versão major pendente há mais de {{ .Values.metrics.prometheusRule.outdatedDaysThreshold }} dias"
+            summary: "{{ if $pt }}{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) tem versão major pendente há mais de {{ .Values.metrics.prometheusRule.outdatedDaysThreshold }} dias{{ else }}{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) has had a major update pending for more than {{ .Values.metrics.prometheusRule.outdatedDaysThreshold }} days{{ end }}"
         - alert: ChangelogWatcherEndOfLifeSoon
           # value: days left (soon always has a date)
           expr: changelog_watcher_app_eol_days_left and on (project, environment, product, cycle) changelog_watcher_app_eol_level == 1
@@ -24,26 +25,26 @@ spec:
           labels:
             severity: info
           annotations:
-            summary: "{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) usa {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, que perde suporte em {{`{{ $value }}`}} dias"
+            summary: "{{ if $pt }}{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) usa {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, que perde suporte em {{`{{ $value }}`}} dias{{ else }}{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) runs {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, which loses support in {{`{{ $value }}`}} days{{ end }}"
         - alert: ChangelogWatcherEndOfLifeReached
           expr: changelog_watcher_app_eol_level == 2
           for: 1h
           labels:
             severity: warning
           annotations:
-            summary: "{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) usa {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, que já está sem suporte (EOL)"
+            summary: "{{ if $pt }}{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) usa {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, que já está sem suporte (EOL){{ else }}{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) runs {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, which is already unsupported (EOL){{ end }}"
         - alert: ChangelogWatcherVersionDetectionFailing
           expr: changelog_watcher_app_detection_error == 1
           for: 6h
           labels:
             severity: warning
           annotations:
-            summary: "Não foi possível detectar a versão de {{`{{ $labels.project }}`}} em {{`{{ $labels.environment }}`}} via Prometheus"
+            summary: "{{ if $pt }}Não foi possível detectar a versão de {{`{{ $labels.project }}`}} em {{`{{ $labels.environment }}`}} via Prometheus{{ else }}Could not detect the version of {{`{{ $labels.project }}`}} in {{`{{ $labels.environment }}`}} via Prometheus{{ end }}"
         - alert: ChangelogWatcherRefreshStale
           expr: time() - changelog_watcher_last_refresh_timestamp_seconds > 86400
           for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "changelog-watcher não atualiza os dados há mais de 24h"
+            summary: "{{ if $pt }}changelog-watcher não atualiza os dados há mais de 24h{{ else }}changelog-watcher has not refreshed its data for more than 24h{{ end }}"
 {{- end }}

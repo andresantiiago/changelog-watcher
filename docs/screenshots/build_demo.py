@@ -1,13 +1,14 @@
-"""Monta um banco SQLite de demonstração para as capturas de tela do README.
+"""Builds a demo SQLite database for the README screenshots.
 
-Releases, versões em uso e histórico são sintéticos (datas relativas a hoje), então
-as telas ficam parecidas a cada execução e não dependem de rede.
+Releases, versions in use and history are synthetic (dates relative to today), so the
+screens look the same on every run and need no network.
 
-    python docs/screenshots/build_demo.py /tmp/demo.db /tmp/discover.json
+    python docs/screenshots/build_demo.py /tmp/demo.db /tmp/discover.json [en|pt-BR]
 
-O segundo argumento recebe a resposta de /api/environments/{id}/discover para o
-cenário kube-prometheus-stack (a captura a intercepta, sem Prometheus de verdade).
-Veja docs/screenshots/README.md.
+The second argument receives the /api/environments/{id}/discover answer for the
+kube-prometheus-stack scenario (the capture intercepts that call, no real Prometheus).
+The third one is the language of the data and of the interface (default: en).
+See docs/screenshots/README.md.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 db_path, discover_path = sys.argv[1], sys.argv[2]
+LANG = sys.argv[3] if len(sys.argv) > 3 else "en"
+EN = LANG == "en"
 Path(db_path).unlink(missing_ok=True)
 os.environ.update(DATABASE_URL=f"sqlite:///{db_path}", AUTH_DISABLED="true", SCHEDULER_ENABLED="false",
                   REFRESH_ON_STARTUP="false")
@@ -29,15 +32,27 @@ import httpx  # noqa: E402
 import respx  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
+from changelog_watcher import i18n  # noqa: E402
 from changelog_watcher import prometheus as prom  # noqa: E402
 from changelog_watcher.analysis import compute_statuses, load_environments, summarize  # noqa: E402
 from changelog_watcher.db import init_engine, session_scope  # noqa: E402
-from changelog_watcher.models import Deployment, Environment, Project, Release, Snapshot, Webhook  # noqa: E402
+from changelog_watcher.models import AppSetting, Deployment, Environment, Project, Release, Snapshot, Webhook  # noqa: E402
 from changelog_watcher.refresh import store_snapshots  # noqa: E402
 from changelog_watcher.report import create_report  # noqa: E402
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 ENVS = ["desenvolvimento", "homologacao", "producao"]
+# Data is written in pt-BR below; with LANG=en these names are shown instead.
+EN_NAMES = {
+    "desenvolvimento": "development", "homologacao": "staging", "producao": "production",
+    "plataforma": "platform", "observabilidade": "observability", "rede": "network", "seguranca": "security",
+    "banco-de-dados": "database", "produto": "product", "minha-api": "my-api", "GitOps do cluster": "Cluster GitOps",
+    "slack-plataforma": "slack-platform", "teams-producao": "teams-production",
+}
+
+
+def tr(name: str) -> str:
+    return EN_NAMES.get(name, name) if EN else name
 PROM_URL = "http://prometheus.monitoring:9090"
 
 # name, fields, [(versão, dias atrás)], {ambiente: versão em uso}; "*" = detectada via Prometheus
@@ -99,7 +114,12 @@ PROJECTS = [
      {"desenvolvimento": "2.4.0", "homologacao": "2.4.0", "producao": "2.3.1"}, None),
 ]
 
-NOTES = {
+NOTES_EN = {
+    0: "### Fixes\n- Fixes a memory leak when reconciling large resources\n- Adjusts the default timeout of API calls",
+    1: "### Features\n- New namespace filter in the interface\n- Latency metrics per operation\n\n### Fixes\n- Duplicated logs when the pod restarts",
+    2: "### Breaking changes\n- Removes flags deprecated since the previous version\n- Requires Kubernetes 1.30 or later\n\n### Features\n- New configuration API",
+}
+NOTES = NOTES_EN if EN else {
     0: "### Correções\n- Corrige vazamento de memória ao reconciliar recursos grandes\n- Ajusta timeout padrão das chamadas à API",
     1: "### Novidades\n- Novo filtro por namespace na interface\n- Métricas de latência por operação\n\n### Correções\n- Logs duplicados ao reiniciar o pod",
     2: "### Mudanças incompatíveis\n- Remove flags obsoletas desde a versão anterior\n- Requer Kubernetes 1.30 ou superior\n\n### Novidades\n- Nova API de configuração",
@@ -116,17 +136,23 @@ def kind_of(prev: str | None, ver: str, two_part: bool) -> int:
 
 
 init_engine()
+i18n.set_language(LANG)  # the report below is rendered in this language
 with session_scope() as s:
+    s.add(AppSetting(key="language", value=i18n.get_language()))
     envs = {}
     for i, name in enumerate(ENVS):
-        envs[name] = Environment(name=name, sort_order=i, prometheus_url=PROM_URL,
-                                 description={"desenvolvimento": "Cluster de desenvolvimento",
-                                              "homologacao": "Cluster de homologação",
-                                              "producao": "Cluster de produção"}[name])
+        envs[name] = Environment(name=tr(name), sort_order=i, prometheus_url=PROM_URL,
+                                 description=(f"{tr(name).capitalize()} cluster" if EN else
+                                              {"desenvolvimento": "Cluster de desenvolvimento",
+                                               "homologacao": "Cluster de homologação",
+                                               "producao": "Cluster de produção"}[name]))
         s.add(envs[name])
     s.flush()
     for name, fields, versions, deployed, image in PROJECTS:
-        p = Project(name=name, last_checked_at=NOW - timedelta(minutes=random.Random(name).randint(3, 50)), **fields)
+        fields = {**fields, "tags": [tr(t) for t in fields.get("tags", [])]}
+        if fields.get("description"):
+            fields["description"] = tr(fields["description"])
+        p = Project(name=tr(name), last_checked_at=NOW - timedelta(minutes=random.Random(name).randint(3, 50)), **fields)
         s.add(p)
         s.flush()
         tag = "controller-v{}" if fields.get("tag_pattern") else ("{}" if fields.get("source_type") in ("dockerhub", "changelog", "helm_index") else "v{}")
@@ -147,14 +173,14 @@ with session_scope() as s:
                 dep.detected_version, dep.detected_at = ver, NOW - timedelta(minutes=12)
                 dep.detected_image = f"{image}{ver}" if image else None
             s.add(dep)
-    s.add(Webhook(name="slack-plataforma", kind="slack", url="${SLACK_WEBHOOK_URL}",
+    s.add(Webhook(name=tr("slack-plataforma"), kind="slack", url="${SLACK_WEBHOOK_URL}",
                   last_sent_at=NOW - timedelta(days=3), last_status="HTTP 200"))
-    s.add(Webhook(name="teams-producao", kind="teams", url="${TEAMS_WEBHOOK_URL}", only_outdated=True,
+    s.add(Webhook(name=tr("teams-producao"), kind="teams", url="${TEAMS_WEBHOOK_URL}", only_outdated=True,
                   environment_ids=[envs["producao"].id], last_sent_at=NOW - timedelta(days=3), last_status="HTTP 200"))
 
 store_snapshots()
 
-# Histórico de 90 dias: parte dos valores de hoje e anda para trás com uma tendência suave.
+# 90-day history: starts from today's values and walks back with a smooth trend.
 with session_scope() as s:
     statuses = compute_statuses(s)
     rnd = random.Random(42)
@@ -179,7 +205,7 @@ with session_scope() as s:
             s.add(snap)
     create_report(s, trigger="schedule")
 
-# Resposta da descoberta (cenário kube-prometheus-stack), com os projetos acima já monitorando parte das imagens.
+# Discovery answer (kube-prometheus-stack scenario), with the projects above already tracking some images.
 NS = "kube-monitoring"
 POD, AM = "prometheus-kube-prometheus-stack-prometheus-0", "alertmanager-kube-prometheus-stack-alertmanager-0"
 OP, GF = "kube-prometheus-stack-operator-5d9c7b-abcde", "kube-prometheus-stack-grafana-6c7f-zxcvb"
@@ -219,7 +245,7 @@ def answer(request):
 
 with session_scope() as s, respx.mock:
     respx.get(f"{PROM_URL}/api/v1/query").mock(side_effect=answer)
-    env = s.scalar(select(Environment).where(Environment.name == "producao"))
+    env = s.scalar(select(Environment).where(Environment.name == tr("producao")))
     groups = asyncio.run(prom.discover(env, NS, s.scalars(select(Project)).all()))
 Path(discover_path).write_text(json.dumps({"ok": True, "groups": groups}))
-print(f"banco: {db_path} · descoberta: {discover_path}")
+print(f"database: {db_path} · discovery: {discover_path} · language: {LANG}")

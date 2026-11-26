@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..i18n import _
 from ..versioning import parse_version
 from .base import ReleaseData, SourceError, get_json, paged, parse_datetime
 
@@ -31,7 +32,7 @@ def _repo(project) -> str:
             repo = repo[len(prefix):]
     repo = repo.removesuffix(".git").strip("/")
     if repo.count("/") != 1:
-        raise SourceError(f"repositório GitHub inválido: '{project.repository}' (use owner/repo)")
+        raise SourceError(_("invalid GitHub repository: '{repo}' (use owner/repo)", repo=project.repository))
     return repo
 
 
