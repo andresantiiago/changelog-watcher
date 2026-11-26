@@ -79,8 +79,9 @@ resultado sem salvar nada.
 
 Charts que criam vários Deployments (Argo CD: server, repo-server, controller,
 redis…) viram **uma aplicação** com o modo `helm`: a versão é a imagem usada pela
-maioria dos pods do release (use **Imagem** para fixar qual delas, ex.
-`quay.io/argoproj/argocd`, quando o release roda imagens de terceiros).
+maioria dos pods do release, e no empate a imagem que dá nome ao release (use
+**Imagem** para fixar qual delas, ex. `quay.io/argoproj/argocd`, quando o release
+roda imagens de terceiros ou sidecars).
 
 A tela **Descobrir no cluster** consulta um namespace (ou o cluster todo) e mostra
 os workloads agrupados por release:
@@ -90,7 +91,19 @@ os workloads agrupados por release:
 - cada pod entra no release pelo label `app.kubernetes.io/instance` ou, sem ele,
   pelo prefixo do nome. Para usar o label (e ver o `helm.sh/chart`), habilite no
   kube-state-metrics:
-  `--metric-labels-allowlist=pods=[app.kubernetes.io/instance,helm.sh/chart]`.
+  `--metric-labels-allowlist=pods=[app.kubernetes.io/instance,helm.sh/chart]`;
+- cada **imagem** diferente do grupo pode ser monitorada como uma aplicação própria
+  (ex.: o StatefulSet do Prometheus do `kube-prometheus-stack` roda `prometheus`,
+  `prometheus-config-reloader` e `thanos`): a sugestão fixa a imagem com **Imagem**
+  (modo `helm`) ou **Container** (modo `workload`), e a tela mostra qual aplicação já
+  monitora cada imagem. A imagem principal do grupo é a da maioria dos pods; no empate,
+  a que dá nome ao release/workload (`kube-prometheus-stack-prometheus` → `prometheus`);
+- grupos que não são um release Helm, mas pertencem a um, aparecem logo abaixo dele com
+  **parte de &lt;release&gt;**: pods criados por um operador com o próprio label de
+  instância (`kube-prometheus-stack-prometheus`, `…-alertmanager`) e cujo nome começa
+  pelo release, ou pods com label `app.kubernetes.io/part-of`/`release` apontando para
+  ele (inclua esses labels no allowlist acima para usá-los). Workloads de subcharts
+  mostram o próprio `helm.sh/chart`.
 
 **Monitorar** abre o formulário já preenchido; informe de onde vêm as releases:
 repositório GitHub/GitLab, CHANGELOG, repositório Helm ou a URL de uma **página

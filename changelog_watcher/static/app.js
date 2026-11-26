@@ -1049,36 +1049,56 @@ async function viewDiscover(view) {
     </form>
     <div id="dc-out"></div>`;
   const out = $("#dc-out", view);
+  const comps = () => st.result.groups.flatMap((g) => g.components.map((c) => ({ g, c })));
+  const trackBtn = (c, key) => c.project
+    ? `<a class="btn sm" href="#/apps/${c.project.id}">Monitorada: ${esc(c.project.name)}</a>`
+    : `<button class="btn sm primary" type="button" data-track="${key}">Monitorar</button>`;
   const draw = () => {
     const r = st.result;
     if (!r) return;
     if (!r.ok) { out.innerHTML = `<div class="card err">⚠ ${esc(r.error)}</div>`; return; }
-    const pending = r.groups.filter((g) => !g.project);
+    const pending = comps().filter(({ c }) => !c.project);
     const allBtn = $("#dc-all", view);
     allBtn.hidden = !pending.length;
     allBtn.textContent = `Monitorar todos (${pending.length})`;
-    out.innerHTML = r.groups.map((g, i) => `<div class="card" style="margin-bottom:12px">
+    out.innerHTML = r.groups.map((g, i) => {
+      const multi = g.components.length > 1;
+      const tracked = g.components.filter((c) => c.project).length;
+      return `<div class="card${g.parent ? " dc-child" : ""}" style="margin-bottom:12px">
       <div class="card-head"><div>
         <div class="row"><h2 style="margin:0">${esc(g.release || g.workloads[0].name)}</h2>
           ${g.release ? `<span class="chip">${g.helm ? `Helm${g.revision ? ` rev ${g.revision}` : ""}` : "release (label)"}</span>` : '<span class="chip">sem Helm</span>'}
-          ${g.chart ? `<span class="chip">${esc(g.chart)}</span>` : ""}<span class="small muted">${esc(g.namespace)}</span></div>
-        <div class="small muted" style="margin-top:4px">${g.workloads.length} workload(s) · versão ${ver(g.version)} ${g.image ? `<span class="mono">${esc(g.image)}</span>` : ""}</div>
+          ${g.chart ? `<span class="chip">${esc(g.chart)}</span>` : ""}
+          ${g.parent ? `<span class="chip" title="Pods criados por um operador ou subchart do release Helm ${esc(g.parent)}">↳ parte de ${esc(g.parent)}</span>` : ""}
+          <span class="small muted">${esc(g.namespace)}</span></div>
+        <div class="small muted" style="margin-top:4px">${g.workloads.length} workload(s) · ${multi ? `${g.components.length} imagens · ${tracked} monitorada(s)` : `versão ${ver(g.version)} ${g.image ? `<span class="mono">${esc(g.image)}</span>` : ""}`}</div>
       </div>
-      ${g.project ? `<a class="btn sm" href="#/apps/${g.project.id}">Monitorada: ${esc(g.project.name)}</a>` : `<button class="btn sm primary" type="button" data-track="${i}">Monitorar</button>`}</div>
+      ${multi ? "" : trackBtn(g.components[0], `${i}:0`)}</div>
+      ${multi ? `<div class="table-wrap"><table>
+        <thead><tr><th>Imagem</th><th>Versão</th><th>Containers</th><th></th></tr></thead>
+        <tbody>${g.components.map((c, j) => `<tr><td class="mono small">${esc(c.repository || "?")}</td><td>${ver(c.version)}</td>
+          <td class="small">${c.containers.map((x) => `<div><span class="muted">${esc(x.workload)}</span> ${esc(x.container)}</div>`).join("")}</td>
+          <td class="nowrap right">${trackBtn(c, `${i}:${j}`)}</td></tr>`).join("")}</tbody>
+      </table></div>` : ""}
       <details><summary class="small">Workloads e imagens</summary><div class="table-wrap"><table><tbody>
-        ${g.workloads.map((w) => `<tr><td class="nowrap"><span class="muted small">${esc(w.kind)}</span> <b>${esc(w.name)}</b></td><td>${w.containers.map((c) => `<div class="small"><span class="muted">${esc(c.container)}</span> <span class="mono">${esc(c.image)}</span></div>`).join("")}</td></tr>`).join("")}
+        ${g.workloads.map((w) => `<tr><td class="nowrap"><span class="muted small">${esc(w.kind)}</span> <b>${esc(w.name)}</b>${w.chart && w.chart !== g.chart ? ` <span class="chip" title="subchart">${esc(w.chart)}</span>` : ""}</td><td>${w.containers.map((c) => `<div class="small"><span class="muted">${esc(c.container)}</span> <span class="mono">${esc(c.image)}</span></div>`).join("")}</td></tr>`).join("")}
       </tbody></table></div></details>
-    </div>`).join("") || `<div class="card empty">Nenhum container encontrado.</div>`;
-    $$("[data-track]", out).forEach((b) => b.addEventListener("click", () => { const g = r.groups[Number(b.dataset.track)]; projectForm(g.suggestion, true, { image: g.image, chart: g.chart }); }));
+    </div>`;
+    }).join("") || `<div class="card empty">Nenhum container encontrado.</div>`;
+    $$("[data-track]", out).forEach((b) => b.addEventListener("click", () => {
+      const [i, j] = b.dataset.track.split(":").map(Number);
+      const c = r.groups[i].components[j];
+      projectForm(c.suggestion, true, { image: c.image, chart: c.chart });
+    }));
   };
   $("#dc-all", view).addEventListener("click", async (e) => {
-    const todo = st.result.groups.filter((g) => !g.project);
-    if (!confirm(`Monitorar ${todo.length} aplicação(ões)? Sem repositório conhecido, usa-se a imagem no Docker Hub – ajuste depois em Aplicações.`)) return;
+    const todo = comps().filter(({ c }) => !c.project);
+    if (!confirm(`Monitorar ${todo.length} imagem(ns)? Cada imagem vira uma aplicação. Sem repositório conhecido, usa-se a imagem no Docker Hub – ajuste depois em Aplicações.`)) return;
     e.target.disabled = true;
     let ok = 0; const fails = [];
-    for (const g of todo) {
-      const sg = g.suggestion;
-      const image = (g.image || "").split("@")[0].replace(/:[^/:]*$/, "");
+    for (const { c } of todo) {
+      const sg = c.suggestion;
+      const image = (c.image || "").split("@")[0].replace(/:[^/:]*$/, "");
       const repository = sg.repository || image;
       if (!repository) { fails.push(`${sg.name}: sem imagem/repositório`); continue; }
       try {

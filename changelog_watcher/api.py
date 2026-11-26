@@ -170,17 +170,12 @@ async def test_environment(env_id: int, db: Session = Depends(get_db)):
 
 @router.get("/environments/{env_id}/discover")
 async def discover_environment(env_id: int, namespace: str | None = None, db: Session = Depends(get_db)):
-    """Workloads of a namespace grouped by Helm release, with the project that already tracks each group."""
+    """Workloads of a namespace grouped by Helm release, one component per image, with the project tracking each."""
     env = _get(db, Environment, env_id)
     try:
-        groups = await prom.discover(env, (namespace or "").strip() or None)
+        groups = await prom.discover(env, (namespace or "").strip() or None, db.scalars(select(Project)).all())
     except prom.PrometheusError as exc:
         return {"ok": False, "error": str(exc)}
-    tracked = {(p.workload_namespace, p.workload_name): p for p in db.scalars(select(Project))}
-    for g in groups:
-        s = g["suggestion"]
-        p = tracked.get((s["workload_namespace"], s.get("workload_name")))
-        g["project"] = {"id": p.id, "name": p.name} if p else None
     return {"ok": True, "groups": groups}
 
 
