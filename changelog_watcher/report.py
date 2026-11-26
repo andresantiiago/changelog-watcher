@@ -59,6 +59,11 @@ def _arrow(st: dict) -> str:
     return ", ".join(f"{name} **{st[f'latest_{k}']}**" for k, name in kinds if st.get(f"latest_{k}")) or "—"
 
 
+def _libyears(summary: dict) -> str:
+    avg = summary.get("libyears_avg")
+    return "—" if avg is None else f"{avg:.2f}"
+
+
 def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) -> str:
     start = data["period_start"][:10]
     end = data["period_end"][:10]
@@ -67,13 +72,13 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
     lines.append("## Resumo por ambiente")
     lines.append("")
     lines.append("| Ambiente | Atualizado | Apps | Com bugfix pendente | Com minor pendente | Com major pendente "
-                 "| Sem versão | Libyears | Atraso médio (dias) |")
+                 "| Sem versão | Libyears (média) | Atraso médio (dias) |")
     lines.append("|---|---|---|---|---|---|---|---|---|")
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
             f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {s['total']} | {s['patch_pending']} | "
-            f"{s['minor_pending']} | {s['major_pending']} | {c['unknown']} | {s['libyears']:.2f} | "
+            f"{s['minor_pending']} | {s['major_pending']} | {c['unknown']} | {_libyears(s)} | "
             f"{s['avg_outdated_days']:.0f} |"
         )
     lines.append("")

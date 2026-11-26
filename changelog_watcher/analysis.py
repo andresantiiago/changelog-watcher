@@ -235,6 +235,7 @@ def summarize(statuses: list[DeploymentStatus]) -> dict:
                 buckets[label] += 1
                 break
     days = [s.outdated_days for s in outdated]
+    ages = [s.libyears for s in statuses if s.libyears is not None]
     return {
         "total": total,
         "known": known,
@@ -244,7 +245,9 @@ def summarize(statuses: list[DeploymentStatus]) -> dict:
         "minor_pending": sum(1 for s in statuses if s.latest_minor),
         "major_pending": sum(1 for s in statuses if s.latest_major),
         "up_to_date_ratio": round(counts[STATUS_UP_TO_DATE] / known, 4) if known else None,
-        "libyears": round(sum(s.libyears or 0 for s in statuses), 3),
+        "libyears": round(sum(ages), 3),
+        # Mean over deployments with a known libyears value; None when none has one.
+        "libyears_avg": round(sum(ages) / len(ages), 3) if ages else None,
         "avg_outdated_days": round(sum(days) / len(days), 1) if days else 0.0,
         "max_outdated_days": max(days) if days else 0.0,
         "versions_behind": sum(s.versions_behind for s in statuses),

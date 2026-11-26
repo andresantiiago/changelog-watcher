@@ -28,6 +28,10 @@ def test_dashboard(client, seeded):
     assert prod["counts"]["major"] == 1
     assert prod["patch_pending"] == 1
     assert prod["up_to_date_ratio"] == round(2 / 3, 4)
+    statuses = client.get("/api/status?environment_id=%d" % prod["environment_id"]).json()
+    ages = [s["libyears"] for s in statuses if s["libyears"] is not None]
+    assert prod["libyears_avg"] == round(sum(ages) / len(ages), 3)
+    assert prod["libyears_avg"] < prod["libyears"] or len(ages) == 1
     assert d["drift_count"] == 1  # app-a differs between environments
     assert d["overall"]["total"] == 5
 
@@ -119,6 +123,34 @@ def test_history_snapshot(client, seeded):
     hist = client.get("/api/history").json()
     prod = next(h for h in hist if h["environment"] == "producao")
     assert prod["major"] == 1 and prod["total"] == 3
+    assert prod["libyears_avg"] is not None
+
+
+def test_history_libyears_avg_fallback(client, seeded):
+    """Snapshots saved before libyears_avg existed get it approximated from the sum."""
+    from datetime import date
+
+    from changelog_watcher.db import session_scope
+    from changelog_watcher.models import Environment, Snapshot
+
+    with session_scope() as s:
+        env = s.query(Environment).filter_by(name="producao").one()
+        s.add(Snapshot(environment_id=env.id, day=date.today(), total=4, unknown=1, libyears=3.0))
+    prod = next(h for h in client.get("/api/history").json() if h["environment"] == "producao")
+    assert prod["libyears_avg"] == 1.0
+
+
+def test_summarize_libyears_avg():
+    from changelog_watcher.analysis import DeploymentStatus, summarize
+
+    def st(lib, status="major"):
+        return DeploymentStatus(project_id=1, project="p", environment_id=1, environment="e", version_source="manual",
+                                current_version="1.0.0", status=status, level=3, libyears=lib)
+
+    summ = summarize([st(1.0), st(3.0), st(None, "unknown"), st(0.0, "up_to_date")])
+    assert summ["libyears"] == 4.0
+    assert summ["libyears_avg"] == round(4.0 / 3, 3)
+    assert summarize([st(None, "unknown")])["libyears_avg"] is None
 
 
 def test_refresh_with_github(client, seeded):
