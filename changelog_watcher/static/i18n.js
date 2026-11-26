@@ -324,6 +324,7 @@ const I18N = {
     "{n} application(s) added": "{n} aplicação(ões) adicionada(s)",
     "{n} applications with different versions across environments": "{n} aplicações com versões diferentes entre ambientes",
     "{n} behind": "{n} atrás",
+    "{n} day": "{n} dia",
     "{n} days": "{n} dias",
     "{n} days ago": "há {n} dias",
     "{n} deployments": "{n} implantações",

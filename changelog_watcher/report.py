@@ -71,6 +71,11 @@ def eol_when(st: dict) -> str:
     return _("{date} (in {n} days)", date=when, n=left)
 
 
+def _days(n: float) -> str:
+    n = round(n)
+    return _("{n} day", n=n) if n == 1 else _("{n} days", n=n)
+
+
 def _row(*cells: str) -> str:
     return "| " + " | ".join(cells) + " |"
 
@@ -131,7 +136,7 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
         for o in outdated[:max_outdated]:
             lines.append(
                 f"| {o['environment']} | {STATUS_ICON[o['status']]} {o['project']} | {o['current_version']} | "
-                f"{_arrow(o)} | " + _("{n} days", n=f"{o['outdated_days']:.0f}") + " |"
+                f"{_arrow(o)} | " + _days(o["outdated_days"]) + " |"
             )
         if len(outdated) > max_outdated:
             lines.append("\n" + _("_… and {n} more_", n=len(outdated) - max_outdated))

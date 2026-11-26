@@ -56,7 +56,7 @@ function days(n) {
   if (!n) return t("{n} days", { n: 0 });
   if (n >= 365) return t("{n} years", { n: num(n / 365, 1) });
   if (n >= 60) return t("{n} months", { n: Math.round(n / 30) });
-  return t("{n} days", { n: Math.round(n) });
+  return Math.round(n) === 1 ? t("{n} day", { n: 1 }) : t("{n} days", { n: Math.round(n) });
 }
 function num(n, d = 0) { return Number(n || 0).toLocaleString(locale(), { maximumFractionDigits: d, minimumFractionDigits: d }); }
 function badge(status, text) {

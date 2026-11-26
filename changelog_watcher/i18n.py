@@ -182,6 +182,7 @@ _PT_BR: dict[str, str] = {
     "Available": "Disponível",
     "Outdated for": "Atrasada há",
     "{n} days": "{n} dias",
+    "{n} day": "{n} dia",
     "_… and {n} more_": "_… e mais {n}_",
     "_Everything up to date 🎉_": "_Tudo atualizado 🎉_",
     "End of life (EOL) ({n})": "Fim de suporte (EOL) ({n})",

@@ -1,10 +1,10 @@
-# Configuração inicial (seed) do changelog-watcher.
-# Carregada no startup quando CONFIG_FILE aponta para este arquivo.
-# Por padrão só cria o que não existe (a UI passa a ser a dona dos dados);
-# com SEED_OVERWRITE=true o arquivo sobrescreve os campos declarados.
+# changelog-watcher initial configuration (seed).
+# Loaded on startup when CONFIG_FILE points to this file.
+# By default it only creates what does not exist (the UI then owns the data);
+# with SEED_OVERWRITE=true the file overwrites the fields it declares.
 #
-# Valores no formato ${VARIAVEL} são lidos do ambiente no momento do uso,
-# então tokens e URLs de webhook podem vir de um Secret do Kubernetes.
+# Values like ${VARIABLE} are read from the environment at use time,
+# so tokens and webhook URLs can come from a Kubernetes Secret.
 
 environments:
   - name: desenvolvimento
@@ -16,24 +16,24 @@ environments:
     prometheus_url: https://thanos.empresa.com
     prometheus_auth: bearer               # none | bearer | basic
     prometheus_token: ${PROM_PROD_TOKEN}
-    prometheus_extra_selector: cluster="prod"   # adicionado a todas as queries
+    prometheus_extra_selector: cluster="prod"   # added to every query
     prometheus_verify_tls: true
 
 projects:
-  # Releases do GitHub; versão em uso = todos os workloads do release Helm "argocd".
+  # GitHub releases; version in use = every workload of the "argocd" Helm release.
   - name: argo-cd
     tags: [plataforma]
-    source_type: github_releases          # ... | changelog | webpage (URL de uma página com as versões)
+    source_type: github_releases          # ... | changelog | webpage (URL of a page listing the versions)
     repository: argoproj/argo-cd
     detection_mode: helm                  # none | workload | helm | image | query
     workload_namespace: argocd
-    workload_name: argocd                 # nome do release (no modo workload, o do Deployment)
-    image_pattern: quay.io/argoproj/argocd  # ignora redis/dex do mesmo release
+    workload_name: argocd                 # release name (in workload mode, the Deployment's)
+    image_pattern: quay.io/argoproj/argocd  # ignores redis/dex of the same release
     deployments:
-      desenvolvimento: {}                 # versão via Prometheus
+      desenvolvimento: {}                 # version via Prometheus
       producao: {}
 
-  # Detecção por imagem: qualquer pod rodando ghcr.io/.../cert-manager-controller
+  # Detection by image: any pod running ghcr.io/.../cert-manager-controller
   - name: cert-manager
     source_type: github_releases
     repository: cert-manager/cert-manager
@@ -43,7 +43,7 @@ projects:
       desenvolvimento: {}
       producao: {}
 
-  # Monorepo: filtra as tags do chart com tag_pattern
+  # Monorepo: filters the chart tags with tag_pattern
   - name: kube-prometheus-stack
     source_type: helm_index
     repository: https://prometheus-community.github.io/helm-charts
@@ -51,12 +51,12 @@ projects:
     deployments:
       producao: {version_source: manual, manual_version: "65.1.0"}
 
-  # Imagem do Docker Hub; PostgreSQL usa "major.bugfix" (16.2 -> 16.9 é bugfix)
+  # Docker Hub image; PostgreSQL uses "major.bugfix" (16.2 -> 16.9 is a bugfix)
   - name: postgres
     source_type: dockerhub
     repository: library/postgres
     version_scheme: major_patch
-    eol_product: postgresql               # endoflife.date (vazio = procura pelo nome; none = desativa)
+    eol_product: postgresql               # endoflife.date (empty = look up by name; none = disabled)
     detection_mode: workload
     workload_kind: statefulset
     workload_namespace: database
@@ -65,14 +65,14 @@ projects:
       producao: {}
       desenvolvimento: {namespace_override: database-dev}
 
-  # Projeto sem releases, só com CHANGELOG.md
+  # Project without releases, only a CHANGELOG.md
   - name: minha-api
     source_type: changelog
     repository: https://github.com/minha-org/minha-api/blob/main/CHANGELOG.md
     deployments:
-      producao: "2.3.1"                   # atalho para versão manual
+      producao: "2.3.1"                   # shortcut for a manual version
 
-  # GitLab self-hosted com tags; notas complementadas pelo CHANGELOG
+  # Self-hosted GitLab with tags; notes completed from the CHANGELOG
   - name: servico-interno
     source_type: gitlab_tags
     repository: plataforma/servico-interno
@@ -91,5 +91,5 @@ webhooks:
   - name: teams-producao
     kind: teams
     url: ${TEAMS_WEBHOOK_URL}
-    environments: [producao]              # só inclui estes ambientes
-    only_outdated: true                   # não envia se estiver tudo atualizado
+    environments: [producao]              # only these environments
+    only_outdated: true                   # does not send when everything is up to date

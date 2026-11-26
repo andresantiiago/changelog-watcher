@@ -42,3 +42,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "cw.hasSeed" -}}
 {{- if or .Values.seed.environments .Values.seed.projects .Values.seed.webhooks -}}true{{- end -}}
 {{- end -}}
+
+{{/* Language of the chart's texts (NOTES, alerts, dashboard): "pt-BR" or "en". */}}
+{{- define "cw.lang" -}}
+{{- $l := lower (toString (.Values.config.language | default "en")) -}}
+{{- if or (eq $l "pt-br") (eq $l "pt_br") (eq $l "pt") -}}pt-BR{{- else -}}en{{- end -}}
+{{- end }}
