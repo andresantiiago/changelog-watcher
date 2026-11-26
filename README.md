@@ -10,7 +10,8 @@ que está rodando em cada ambiente e avisa o que precisa ser atualizado.
   (imagem do Deployment/StatefulSet/DaemonSet via kube-state-metrics), inclusive
   agrupando **todos os workloads de um release Helm** como uma única aplicação.
 - **Descoberta no cluster**: lista o que roda num namespace agrupado por release
-  Helm e cria a aplicação com um clique, apontando para o repositório ou site de releases.
+  Helm (com os releases criados por operadores ligados ao release pai) e cria uma
+  aplicação por imagem com um clique, apontando para o repositório ou site de releases.
 - **Vários ambientes** (dev, homologação, produção…), cada um com seu Prometheus,
   e **comparação de versões entre ambientes**.
 - Para cada aplicação/ambiente: **bugfix** mais recente da linha em uso
@@ -22,7 +23,41 @@ que está rodando em cada ambiente e avisa o que precisa ser atualizado.
 - **Métricas Prometheus** em `/metrics`, **dashboard do Grafana** e **chart Helm**
   inclusos.
 
-![dashboard](docs/dashboard.png)
+![Dashboard: % atualizado, pendências por bugfix/minor/major, atraso e evolução por ambiente](docs/dashboard.png)
+
+## Telas
+
+**Aplicações**: versão em uso em cada ambiente, a maior atualização pendente e a versão
+mais recente, com filtros por status, ambiente, tag e namespace.
+
+![Lista de aplicações com a versão e o status em cada ambiente](docs/aplicacoes.png)
+
+**Detalhe da aplicação**: por ambiente, a versão em uso (manual ou detectada via
+Prometheus, com a imagem), o bugfix/minor/major disponível, há quanto tempo está
+atrasada e o changelog pendente; abaixo, todas as versões publicadas com as notas.
+
+![Detalhe do argo-cd com um cartão por ambiente e as notas das versões](docs/aplicacao.png)
+
+**Comparar ambientes**: o que está à frente ou atrás entre dois ambientes (ex.:
+produção × desenvolvimento), com as versões entre eles, e a matriz de versões de
+todos os ambientes.
+
+![Comparação produção × desenvolvimento](docs/comparar.png)
+
+**Novas versões**: releases publicadas nos últimos 7/14/30/90 dias que ainda não
+estão em uso, com o tipo de atualização e a versão de cada ambiente.
+
+![Novas versões dos últimos 7 dias](docs/novas-versoes.png)
+
+**Relatórios**: o relatório semanal (resumo por ambiente, novas versões e aplicações
+desatualizadas) com o histórico, a prévia e o envio aos webhooks.
+
+![Relatório semanal gerado](docs/relatorio.png)
+
+A tela **Descobrir no cluster** está em
+[Releases Helm e descoberta no cluster](#releases-helm-e-descoberta-no-cluster). As
+imagens usam dados de demonstração; veja [docs/screenshots](docs/screenshots/README.md)
+para regerá-las.
 
 ## Como as versões são classificadas
 
@@ -104,6 +139,8 @@ os workloads agrupados por release:
   pelo release, ou pods com label `app.kubernetes.io/part-of`/`release` apontando para
   ele (inclua esses labels no allowlist acima para usá-los). Workloads de subcharts
   mostram o próprio `helm.sh/chart`.
+
+![Descoberta do kube-prometheus-stack: uma linha por imagem e os releases do operator ligados ao release Helm](docs/descobrir.png)
 
 **Monitorar** abre o formulário já preenchido; informe de onde vêm as releases:
 repositório GitHub/GitLab, CHANGELOG, repositório Helm ou a URL de uma **página
