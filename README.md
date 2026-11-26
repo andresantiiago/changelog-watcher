@@ -73,6 +73,10 @@ publicadas (pre-releases ignoradas, a menos que habilitado) e calcula:
 | **atrasada há** | dias desde a publicação da primeira versão mais nova que a em uso | 200 dias |
 | **libyears** | anos entre a publicação da versão em uso e a da mais recente ([libyear](https://libyear.com)) | 1,1 |
 
+Por ambiente, o dashboard, o relatório e o Grafana mostram a **média** de libyears por implantação
+(só as que têm libyears calculado), para que ambientes com mais aplicações não pareçam mais antigos só
+por terem mais itens. A soma continua exposta em `environment_libyears_total`.
+
 Versões maiores muito mais antigas que outra menor são ignoradas (em todo lugar: status,
 métricas, comparação entre ambientes e lista de versões): uma versão sai quando todas as versões
 iguais ou maiores que ela foram publicadas mais de 2 anos antes de alguma versão menor. Ex.: o
@@ -431,6 +435,7 @@ Todas com prefixo `changelog_watcher_`, calculadas a partir do banco a cada scra
 | `environment_up_to_date_ratio` | environment | fração atualizada |
 | `environment_apps_total` | environment | total de implantações |
 | `environment_libyears_total` | environment | soma de libyears |
+| `environment_libyears_avg` | environment | média de libyears por implantação (só implantações com libyears calculado) |
 | `environment_outdated_days_avg` / `_max` | environment | atraso médio/máximo |
 | `environment_versions_behind_total` | environment | soma de versões atrás |
 | `environment_apps_by_age` | environment, bucket | desatualizadas por faixa de atraso |

@@ -494,7 +494,7 @@ async function viewDashboard(view) {
       ${kpi(`${badge("patch", "Bugfix")} pendente`, num(o.patch_pending), `${o.counts.patch} só com bugfix pendente`, "", "", { status: "has_patch", env: S.envFilter })}
       ${kpi(`${badge("minor", "Minor")} pendente`, num(o.minor_pending), `${o.counts.minor} com minor como maior salto`, "", "", { status: "has_minor", env: S.envFilter })}
       ${kpi(`${badge("major", "Major")} pendente`, num(o.major_pending), `${o.counts.major} implantações`, "", "", { status: "has_major", env: S.envFilter })}
-      ${kpi("Idade acumulada", `${num(o.libyears, 1)} <span class="small muted">libyears</span>`, "soma do atraso entre a versão em uso e a mais recente", "", "", { status: "outdated", env: S.envFilter })}
+      ${kpi("Idade média", o.libyears_avg == null ? "—" : `${num(o.libyears_avg, 2)} <span class="small muted">libyears</span>`, "média, por implantação, do atraso entre a versão em uso e a mais recente", "", "", { status: "outdated", env: S.envFilter })}
       ${kpi("Atraso médio", days(o.avg_outdated_days), `maior atraso: ${days(o.max_outdated_days)}`, "", "", { status: "outdated", env: S.envFilter })}
       ${kpi("Diferenças entre ambientes", num(d.drift_count), `<a href="#/compare">comparar ambientes</a>`, "", "", { href: "#/compare" })}
     </div>
@@ -504,7 +504,7 @@ async function viewDashboard(view) {
     </div>
     <div class="grid cols-2" style="margin-top:16px">
       <div class="card"><div class="card-head"><h2>% atualizado ao longo do tempo</h2></div><div class="chart" id="ch-trend"></div><div id="lg-trend"></div></div>
-      <div class="card"><div class="card-head"><h2>Envelhecimento do ambiente (libyears)</h2><span class="sub">quanto maior, mais antigo</span></div><div class="chart" id="ch-lib"></div><div id="lg-lib"></div></div>
+      <div class="card"><div class="card-head"><h2>Envelhecimento do ambiente (libyears)</h2><span class="sub">média por implantação · quanto maior, mais antigo</span></div><div class="chart" id="ch-lib"></div><div id="lg-lib"></div></div>
     </div>
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h2>Mais desatualizadas</h2><a class="small" href="#/apps">ver todas</a></div>
@@ -535,9 +535,9 @@ async function viewDashboard(view) {
   const byEnv = {};
   hist.forEach((h) => { (byEnv[h.environment_id] ||= []).push(h); });
   const trend = Object.entries(byEnv).map(([id, pts]) => ({ name: envName(id), color: envColor(id), points: pts.map((p) => ({ x: p.day, y: p.up_to_date_ratio == null ? null : p.up_to_date_ratio * 100 })) }));
-  const lib = Object.entries(byEnv).map(([id, pts]) => ({ name: envName(id), color: envColor(id), points: pts.map((p) => ({ x: p.day, y: p.libyears })) }));
+  const lib = Object.entries(byEnv).map(([id, pts]) => ({ name: envName(id), color: envColor(id), points: pts.map((p) => ({ x: p.day, y: p.libyears_avg })) }));
   lineChart($("#ch-trend", view), trend, { yMax: 100, yFmt: (v) => `${Math.round(v)}%`, label: "Percentual atualizado" });
-  lineChart($("#ch-lib", view), lib, { yFmt: (v, tip) => (tip ? `${num(v, 2)} libyears` : num(v, 1)), label: "Libyears" });
+  lineChart($("#ch-lib", view), lib, { yFmt: (v, tip) => (tip ? `${num(v, 2)} libyears` : num(v, 1)), label: "Libyears médio" });
   if (trend.length > 1) { $("#lg-trend", view).innerHTML = legend(trend.map((s) => ({ label: s.name, color: s.color })), true); $("#lg-lib", view).innerHTML = legend(lib.map((s) => ({ label: s.name, color: s.color })), true); }
 }
 

@@ -160,7 +160,7 @@ with session_scope() as s:
     rnd = random.Random(42)
     for env in load_environments(s):
         today = summarize([st for st in statuses if st.environment_id == env.id])
-        ratio, libyears = today["up_to_date_ratio"] or 0.0, today["libyears"]
+        ratio, libyears, lib_avg = today["up_to_date_ratio"] or 0.0, today["libyears"], today["libyears_avg"] or 0.0
         total = today["total"]
         today_up = round(ratio * total)
         drops = sorted(rnd.sample(range(5, 90), min(today_up, 3)))  # dias (para trás) em que houve atualização
@@ -169,10 +169,11 @@ with session_scope() as s:
             rest = total - up
             major = round(rest * 0.4)
             minor = round(rest * 0.4)
+            drift = (1 + back * 0.004) * rnd.uniform(0.99, 1.01)
             snap = Snapshot(environment_id=env.id, day=(NOW - timedelta(days=back)).date(), total=total,
                             up_to_date=up, patch=rest - major - minor, minor=minor, major=major, unknown=0,
                             up_to_date_ratio=up / total if total else None,
-                            libyears=max(0.0, libyears * (1 + back * 0.004) * rnd.uniform(0.99, 1.01)),
+                            libyears=max(0.0, libyears * drift), libyears_avg=max(0.0, lib_avg * drift),
                             avg_outdated_days=today["avg_outdated_days"] * (1 + back * 0.002),
                             max_outdated_days=today["max_outdated_days"], versions_behind=today["versions_behind"])
             s.add(snap)
