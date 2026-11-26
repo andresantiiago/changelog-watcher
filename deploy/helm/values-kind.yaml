@@ -1,4 +1,4 @@
-# Valores para rodar no cluster kind local com a imagem construída localmente.
+# Values to run on a local kind cluster with a locally built image.
 #   docker build -t changelog-watcher:local .
 #   kind load docker-image changelog-watcher:local --name lab
 #   helm upgrade --install changelog-watcher deploy/helm/changelog-watcher -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml
@@ -6,19 +6,19 @@
 image:
   repository: changelog-watcher
   tag: local
-  pullPolicy: Never          # a imagem foi carregada no nó com `kind load`
+  pullPolicy: Never          # the image was loaded into the node with `kind load`
 
-# Banco em memória: os dados são perdidos a cada reinício do pod (o seed abaixo recria o estado).
+# In-memory database: data is lost on every pod restart (the seed below recreates the state).
 persistence:
   type: inMemory
 
 config:
   publicUrl: http://changelog-watcher.localhost:8000
   refreshOnStartup: true
-  seedOverwrite: true          # o YAML é a fonte de verdade a cada start
+  seedOverwrite: true          # the YAML is the source of truth on every start
 
-# Exposição via Traefik (IngressClass "traefik" do cluster). Os navegadores resolvem *.localhost
-# para 127.0.0.1, então basta o port-forward do Traefik acima (o kind não publica a porta 80 no host).
+# Exposed through Traefik (the cluster's "traefik" IngressClass). Browsers resolve *.localhost
+# to 127.0.0.1, so the Traefik port-forward above is enough (kind does not publish port 80 on the host).
 ingress:
   enabled: true
   className: traefik
@@ -28,11 +28,11 @@ ingress:
         - path: /
           pathType: Prefix
 
-# Prometheus do kube-prometheus-stack do próprio cluster (acesso interno, sem auth).
+# The cluster's own kube-prometheus-stack Prometheus (internal access, no auth).
 seed:
   environments:
     - name: kind-lab
-      description: Cluster kind local
+      description: Local kind cluster
       prometheus_url: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
   projects:
     - name: grafana

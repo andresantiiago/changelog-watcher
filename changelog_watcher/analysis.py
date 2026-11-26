@@ -26,7 +26,7 @@ AGE_BUCKETS = [
     ("30-90d", 30, 90),
     ("90-180d", 90, 180),
     ("180-365d", 180, 365),
-    (">1 ano", 365, None),
+    (">365d", 365, None),
 ]
 # ponytail: limite fixo; vira setting se algum projeto precisar de outro valor.
 STALE_AFTER = timedelta(days=730)

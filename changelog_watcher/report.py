@@ -81,7 +81,7 @@ def _row(*cells: str) -> str:
 
 
 def _pct(ratio) -> str:
-    return "n/d" if ratio is None else f"{ratio * 100:.0f}%"
+    return _("n/a") if ratio is None else f"{ratio * 100:.0f}%"
 
 
 def _arrow(st: dict) -> str:

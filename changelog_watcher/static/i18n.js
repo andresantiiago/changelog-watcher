@@ -18,7 +18,6 @@ const I18N = {
     ", {n} error(s)": ", {n} erro(s)",
     ", {n} failure(s)": ", {n} falha(s)",
     "0 disables the automatic refresh": "0 desativa a atualização automática",
-    ">1 year": ">1 ano",
     "accepts Thanos/Mimir/VictoriaMetrics (compatible API)": "aceita Thanos/Mimir/VictoriaMetrics (API compatível)",
     "Add at least two environments to compare.": "Cadastre pelo menos dois ambientes para comparar.",
     "Add environments to set the versions in use.": "Cadastre ambientes para informar as versões em uso.",

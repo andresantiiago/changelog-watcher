@@ -163,6 +163,7 @@ _PT_BR: dict[str, str] = {
     # report (Markdown)
     "📦 Update report ({start} → {end})": "📦 Relatório de atualizações ({start} → {end})",
     "Summary by environment": "Resumo por ambiente",
+    "n/a": "n/d",
     "Environment": "Ambiente",
     "Up to date": "Atualizado",
     "Apps": "Apps",

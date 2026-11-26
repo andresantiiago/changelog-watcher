@@ -1,4 +1,4 @@
-# Digest fixado (o Dependabot atualiza, ver .github/dependabot.yml): build reproduzível e base revisada.
+# Pinned digest (Dependabot updates it, see .github/dependabot.yml): reproducible build and reviewed base.
 FROM python:3.15.2-slim@sha256:63bb298d2b7b88f176f51b5189f54ce6535c997682ea70885d2132f5d473a8a5 AS build
 WORKDIR /src
 COPY pyproject.toml README.md ./
@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DATABASE_URL=sqlite:////data/changelog-watcher.db \
     PORT=8080
-# Correções de segurança do Debian publicadas depois da base; o pip não é usado em runtime.
+# Debian security fixes published after the base image; pip is not used at runtime.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall -y pip \
     && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \

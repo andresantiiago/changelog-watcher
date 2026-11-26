@@ -42,4 +42,4 @@ def test_example_config_loads(client):
     assert stats == {"environments": 2, "projects": 6, "webhooks": 2}
     projects = {p["name"]: p for p in client.get("/api/projects").json()}
     assert projects["postgres"]["version_scheme"] == "major_patch"
-    assert projects["minha-api"]["deployments"][0]["manual_version"] == "2.3.1"
+    assert projects["my-api"]["deployments"][0]["manual_version"] == "2.3.1"

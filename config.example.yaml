@@ -7,13 +7,13 @@
 # so tokens and webhook URLs can come from a Kubernetes Secret.
 
 environments:
-  - name: desenvolvimento
-    description: Cluster de desenvolvimento
+  - name: development
+    description: Development cluster
     prometheus_url: http://prometheus-dev.monitoring:9090
 
-  - name: producao
-    description: Cluster de produção (Thanos com vários clusters)
-    prometheus_url: https://thanos.empresa.com
+  - name: production
+    description: Production cluster (Thanos with several clusters)
+    prometheus_url: https://thanos.example.com
     prometheus_auth: bearer               # none | bearer | basic
     prometheus_token: ${PROM_PROD_TOKEN}
     prometheus_extra_selector: cluster="prod"   # added to every query
@@ -22,7 +22,7 @@ environments:
 projects:
   # GitHub releases; version in use = every workload of the "argocd" Helm release.
   - name: argo-cd
-    tags: [plataforma]
+    tags: [platform]
     source_type: github_releases          # ... | changelog | webpage (URL of a page listing the versions)
     repository: argoproj/argo-cd
     detection_mode: helm                  # none | workload | helm | image | query
@@ -30,8 +30,8 @@ projects:
     workload_name: argocd                 # release name (in workload mode, the Deployment's)
     image_pattern: quay.io/argoproj/argocd  # ignores redis/dex of the same release
     deployments:
-      desenvolvimento: {}                 # version via Prometheus
-      producao: {}
+      development: {}                 # version via Prometheus
+      production: {}
 
   # Detection by image: any pod running ghcr.io/.../cert-manager-controller
   - name: cert-manager
@@ -40,8 +40,8 @@ projects:
     detection_mode: image
     image_pattern: quay.io/jetstack/cert-manager-controller
     deployments:
-      desenvolvimento: {}
-      producao: {}
+      development: {}
+      production: {}
 
   # Monorepo: filters the chart tags with tag_pattern
   - name: kube-prometheus-stack
@@ -49,7 +49,7 @@ projects:
     repository: https://prometheus-community.github.io/helm-charts
     chart_name: kube-prometheus-stack
     deployments:
-      producao: {version_source: manual, manual_version: "65.1.0"}
+      production: {version_source: manual, manual_version: "65.1.0"}
 
   # Docker Hub image; PostgreSQL uses "major.bugfix" (16.2 -> 16.9 is a bugfix)
   - name: postgres
@@ -62,34 +62,34 @@ projects:
     workload_namespace: database
     workload_name: postgres
     deployments:
-      producao: {}
-      desenvolvimento: {namespace_override: database-dev}
+      production: {}
+      development: {namespace_override: database-dev}
 
   # Project without releases, only a CHANGELOG.md
-  - name: minha-api
+  - name: my-api
     source_type: changelog
-    repository: https://github.com/minha-org/minha-api/blob/main/CHANGELOG.md
+    repository: https://github.com/my-org/my-api/blob/main/CHANGELOG.md
     deployments:
-      producao: "2.3.1"                   # shortcut for a manual version
+      production: "2.3.1"                   # shortcut for a manual version
 
   # Self-hosted GitLab with tags; notes completed from the CHANGELOG
-  - name: servico-interno
+  - name: internal-service
     source_type: gitlab_tags
-    repository: plataforma/servico-interno
-    source_url: https://gitlab.empresa.com
-    changelog_url: https://gitlab.empresa.com/plataforma/servico-interno/-/raw/main/CHANGELOG.md
+    repository: platform/internal-service
+    source_url: https://gitlab.example.com
+    changelog_url: https://gitlab.example.com/platform/internal-service/-/raw/main/CHANGELOG.md
     detection_mode: query
-    promql_query: kube_pod_container_info{namespace="{namespace}", container="app", pod=~"servico-interno-.*"}
-    workload_namespace: servicos
+    promql_query: kube_pod_container_info{namespace="{namespace}", container="app", pod=~"internal-service-.*"}
+    workload_namespace: services
     deployments:
-      producao: {}
+      production: {}
 
 webhooks:
-  - name: slack-plataforma
+  - name: slack-platform
     kind: slack                           # generic | slack | teams | discord | google_chat
     url: ${SLACK_WEBHOOK_URL}
-  - name: teams-producao
+  - name: teams-production
     kind: teams
     url: ${TEAMS_WEBHOOK_URL}
-    environments: [producao]              # only these environments
+    environments: [production]              # only these environments
     only_outdated: true                   # does not send when everything is up to date
