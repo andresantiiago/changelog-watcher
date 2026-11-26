@@ -17,6 +17,21 @@ spec:
             severity: info
           annotations:
             summary: "{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) tem versão major pendente há mais de {{ .Values.metrics.prometheusRule.outdatedDaysThreshold }} dias"
+        - alert: ChangelogWatcherEndOfLifeSoon
+          # value: days left (soon always has a date)
+          expr: changelog_watcher_app_eol_days_left and on (project, environment, product, cycle) changelog_watcher_app_eol_level == 1
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) usa {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, que perde suporte em {{`{{ $value }}`}} dias"
+        - alert: ChangelogWatcherEndOfLifeReached
+          expr: changelog_watcher_app_eol_level == 2
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{`{{ $labels.project }}`}} ({{`{{ $labels.environment }}`}}) usa {{`{{ $labels.product }}`}} {{`{{ $labels.cycle }}`}}, que já está sem suporte (EOL)"
         - alert: ChangelogWatcherVersionDetectionFailing
           expr: changelog_watcher_app_detection_error == 1
           for: 6h

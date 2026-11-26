@@ -42,6 +42,10 @@ class Settings:
     scheduler_enabled: bool = True
     metrics_cache_seconds: int = 30
     log_level: str = "INFO"
+    eol_enabled: bool = True
+    eol_api_url: str = "https://endoflife.date/api"
+    eol_warning_days: int = 90
+    eol_auto_match: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -70,6 +74,10 @@ class Settings:
             scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), cls.scheduler_enabled),
             metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS") or cls.metrics_cache_seconds),
             log_level=e("LOG_LEVEL") or cls.log_level,
+            eol_enabled=_bool(e("EOL_ENABLED"), cls.eol_enabled),
+            eol_api_url=e("EOL_API_URL", cls.eol_api_url).rstrip("/"),
+            eol_warning_days=int(e("EOL_WARNING_DAYS") or cls.eol_warning_days),
+            eol_auto_match=_bool(e("EOL_AUTO_MATCH"), cls.eol_auto_match),
         )
 
 

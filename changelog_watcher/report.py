@@ -35,6 +35,11 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
         key=lambda s: (s["environment"], -s["level"], -s["outdated_days"], s["project"]),
     )
     matrix = version_matrix(statuses)
+    eol = sorted(
+        (s.to_dict() for s in statuses if s.eol_status in ("eol", "soon")),
+        key=lambda s: (s["eol_status"] != "eol", s["eol_days_left"] if s["eol_days_left"] is not None else -10**6,
+                       s["environment"], s["project"]),
+    )
     return {
         "generated_at": now.isoformat(),
         "period_start": start.isoformat(),
@@ -47,7 +52,22 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
         "outdated": outdated,
         "drift": [r for r in matrix if r["drift"]],
         "drift_pairs": drift_pairs(statuses, environments),
+        "eol": eol,
+        "eol_warning_days": settings.eol_warning_days,
     }
+
+
+EOL_ICON = {"eol": "⛔", "soon": "⏳"}
+
+
+def eol_when(st: dict) -> str:
+    """Human text for a deployment's EOL: date and days left/ago."""
+    left, when = st.get("eol_days_left"), st.get("eol_date")
+    if left is None:
+        return "já atingido" if st.get("eol_status") == "eol" else "—"
+    if left <= 0:
+        return f"{when} (há {-left} dias)" if left else f"{when} (hoje)"
+    return f"{when} (em {left} dias)"
 
 
 def _pct(ratio) -> str:
@@ -113,6 +133,19 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
     else:
         lines.append("_Tudo atualizado 🎉_")
     lines.append("")
+
+    eol = data.get("eol") or []
+    if eol:
+        lines.append(f"## Fim de suporte (EOL) ({len(eol)})")
+        lines.append("")
+        lines.append("| Ambiente | Aplicação | Em uso | Ciclo | Fim de suporte |")
+        lines.append("|---|---|---|---|---|")
+        for o in eol[:max_outdated]:
+            lines.append(f"| {o['environment']} | {EOL_ICON[o['eol_status']]} {o['project']} | {o['current_version']} | "
+                         f"{o['eol_product']} {o['eol_cycle']} | {eol_when(o)} |")
+        if len(eol) > max_outdated:
+            lines.append(f"\n_… e mais {len(eol) - max_outdated}_")
+        lines.append("")
 
     unknown = [o for o in data["outdated"] if o["status"] == "unknown"]
     if unknown:

@@ -21,6 +21,7 @@ from .analysis import (
 )
 from .config import get_settings
 from .db import session_scope
+from .eol import EOL_LEVEL
 from .versioning import STATUS_ORDER
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,12 @@ class WatcherCollector(Collector):
                                      labels=["project", "environment"])
         det_err = GaugeMetricFamily(P + "app_detection_error", "1 se a detecção via Prometheus falhou",
                                     labels=["project", "environment"])
+        eol_level = GaugeMetricFamily(P + "app_eol_level",
+                                      "Fim de suporte do ciclo em uso: 0 com suporte, 1 EOL próximo, 2 EOL atingido",
+                                      labels=["project", "environment", "product", "cycle"])
+        eol_days = GaugeMetricFamily(P + "app_eol_days_left",
+                                     "Dias até o fim de suporte do ciclo em uso (negativo quando já passou)",
+                                     labels=["project", "environment", "product", "cycle"])
         for st in statuses:
             lbl = [st.project, st.environment]
             info.add_metric(lbl + [st.current_version or "", st.latest_version or "", st.latest_patch or "",
@@ -97,7 +104,12 @@ class WatcherCollector(Collector):
                 libyears.add_metric(lbl, st.libyears)
             if st.version_source == "prometheus":
                 det_err.add_metric(lbl, 1 if st.detection_error else 0)
-        yield from (info, level, available, behind, outdated_days, libyears, det_err)
+            if st.eol_status:
+                eol_lbl = lbl + [st.eol_product or "", st.eol_cycle or ""]
+                eol_level.add_metric(eol_lbl, EOL_LEVEL[st.eol_status])
+                if st.eol_days_left is not None:
+                    eol_days.add_metric(eol_lbl, st.eol_days_left)
+        yield from (info, level, available, behind, outdated_days, libyears, det_err, eol_level, eol_days)
 
         env_apps = GaugeMetricFamily(P + "environment_apps", "Aplicações por status no ambiente",
                                      labels=["environment", "status"])
@@ -114,6 +126,9 @@ class WatcherCollector(Collector):
         env_max = GaugeMetricFamily(P + "environment_outdated_days_max", "Maior atraso em dias", labels=["environment"])
         env_behind = GaugeMetricFamily(P + "environment_versions_behind_total", "Soma de versões atrás",
                                        labels=["environment"])
+        env_eol = GaugeMetricFamily(P + "environment_apps_eol",
+                                    "Implantações com fim de suporte próximo (soon) ou atingido (eol)",
+                                    labels=["environment", "status"])
         env_age = GaugeMetricFamily(P + "environment_apps_by_age", "Aplicações desatualizadas por faixa de atraso",
                                     labels=["environment", "bucket"])
         for summ in summaries:
@@ -131,9 +146,12 @@ class WatcherCollector(Collector):
             env_avg.add_metric([env], summ["avg_outdated_days"])
             env_max.add_metric([env], summ["max_outdated_days"])
             env_behind.add_metric([env], summ["versions_behind"])
+            env_eol.add_metric([env, "soon"], summ["eol_soon"])
+            env_eol.add_metric([env, "eol"], summ["eol_reached"])
             for bucket, n in summ["age_buckets"].items():
                 env_age.add_metric([env, bucket], n)
-        yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_lib_avg, env_avg, env_max, env_behind, env_age)
+        yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_lib_avg, env_avg, env_max, env_behind,
+                    env_eol, env_age)
 
         # Drift between environments.
         mismatch = GaugeMetricFamily(P + "project_version_mismatch",

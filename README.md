@@ -18,6 +18,8 @@ que está rodando em cada ambiente e avisa o que precisa ser atualizado.
   (estou na 1.1.3 e existe a 1.1.7), **minor** e **major** mais recentes.
 - **Dashboard web**: % do ambiente atualizado, quantas aplicações estão atrás por
   bugfix/minor/major, há quanto tempo, libyears e a evolução ao longo do tempo.
+- **Fim de suporte (EOL)** do ciclo em uso, consultado no [endoflife.date](https://endoflife.date),
+  com aviso quando falta pouco (90 dias por padrão).
 - **Relatório semanal** enviado por webhook (Slack, Microsoft Teams, Discord,
   Google Chat ou JSON genérico).
 - **Métricas Prometheus** em `/metrics`, **dashboard do Grafana** e **chart Helm**
@@ -93,6 +95,31 @@ Tags como `v1.2.3`, `release-1.2.3`, `chart-1.2.3` e imagens como
 versão: é contador de build (as tags de 2016 do CoreDNS) e seria lido como major 11. Use **padrão de tag** (regex) para filtrar
 tags de monorepos e **esquema de versão `major.bugfix`** para projetos como o
 PostgreSQL, em que `16.2 → 16.9` é bugfix.
+
+## Fim de suporte (EOL)
+
+A cada atualização o watcher consulta o [endoflife.date](https://endoflife.date) e avisa quando o
+ciclo da versão em uso já perdeu suporte (**EOL atingido**) ou perde em até `EOL_WARNING_DAYS`
+dias (**EOL próximo**, 90 por padrão ≈ 3 meses).
+
+- **Produto**: campo *Produto no endoflife.date* da aplicação (`eol_product` no seed), o
+  identificador usado na URL do site (`postgresql`, `kubernetes`, `redis`, `nodejs`…). Vazio, com
+  `EOL_AUTO_MATCH=true`, procura o nome da aplicação e o nome do repositório/imagem/chart na lista
+  de produtos (com alguns apelidos: `postgres` → `postgresql`, `node` → `nodejs`, `k8s` →
+  `kubernetes`…). `none` desativa a verificação para a aplicação.
+- **Ciclo**: o ciclo mais específico que é prefixo da versão em uso (`1.29.3` → `1.29`,
+  PostgreSQL `13.4` → `13`). Versão sem ciclo correspondente fica sem informação de EOL.
+- Fontes `helm_index` sem *Comparar pelo appVersion* não entram na busca automática: a versão do
+  chart não é a do produto (informe o produto só se as versões coincidirem).
+- Onde aparece: tabela "Fim de suporte (EOL)" no dashboard, selo **EOL próximo/atingido** na lista
+  de aplicações (com filtro), linha "Fim de suporte" no detalhe, seção no relatório semanal e nas
+  mensagens dos webhooks (que passam a contar como "algo desatualizado" para `only_outdated`),
+  métricas `app_eol_*` / `environment_apps_eol`, painel no Grafana e alertas
+  `ChangelogWatcherEndOfLifeSoon` / `ChangelogWatcherEndOfLifeReached` no PrometheusRule.
+
+Com NetworkPolicies, o endoflife.date precisa do egress para a internet
+(`networkPolicy.internet.enabled`); sem acesso, a aplicação continua funcionando e o erro aparece
+no detalhe da aplicação.
 
 ## Detecção da versão via Prometheus
 
@@ -367,6 +394,10 @@ recusadas quando o host resolve para loopback ou link-local (metadata da nuvem,
 | `TZ` | `UTC` | fuso do agendador |
 | `PUBLIC_URL` | — | link para a UI incluído no relatório |
 | `MAX_RELEASE_PAGES` | `3` | páginas de 100 releases/tags buscadas por fonte |
+| `EOL_ENABLED` | `true` | consulta o fim de suporte (EOL) no endoflife.date a cada atualização |
+| `EOL_API_URL` | `https://endoflife.date/api` | API do endoflife.date (ou um espelho) |
+| `EOL_WARNING_DAYS` | `90` | avisa "EOL próximo" quando faltam até N dias |
+| `EOL_AUTO_MATCH` | `true` | sem produto informado, procura pelo nome/repositório da aplicação |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API, obrigatória (`/healthz` e `/readyz` ficam abertos); sem elas a aplicação não sobe |
 | `AUTH_DISABLED` | `false` | `true` roda sem autenticação (só para testes locais) |
 | `METRICS_TOKEN` | — | bearer token exigido em `/metrics`; vazio = aberto |
@@ -436,6 +467,9 @@ Todas com prefixo `changelog_watcher_`, calculadas a partir do banco a cada scra
 | `environment_apps_total` | environment | total de implantações |
 | `environment_libyears_total` | environment | soma de libyears |
 | `environment_libyears_avg` | environment | média de libyears por implantação (só implantações com libyears calculado) |
+| `app_eol_level` | project, environment, product, cycle | 0 com suporte, 1 EOL próximo, 2 EOL atingido |
+| `app_eol_days_left` | project, environment, product, cycle | dias até o fim de suporte (negativo: já passou) |
+| `environment_apps_eol` | environment, status (`soon`/`eol`) | implantações com EOL próximo/atingido |
 | `environment_outdated_days_avg` / `_max` | environment | atraso médio/máximo |
 | `environment_versions_behind_total` | environment | soma de versões atrás |
 | `environment_apps_by_age` | environment, bucket | desatualizadas por faixa de atraso |

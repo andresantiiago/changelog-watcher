@@ -56,6 +56,7 @@ projects:
     source_type: dockerhub
     repository: library/postgres
     version_scheme: major_patch
+    eol_product: postgresql               # endoflife.date (vazio = procura pelo nome; none = desativa)
     detection_mode: workload
     workload_kind: statefulset
     workload_namespace: database

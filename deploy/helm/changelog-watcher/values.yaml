@@ -72,6 +72,14 @@ config:
   reportSendEnabled: true
   maxReleasePages: 3
   logLevel: INFO
+  # Fim de suporte (EOL) via endoflife.date.
+  eol:
+    enabled: true
+    apiUrl: https://endoflife.date/api
+    # Avisa quando o EOL do ciclo em uso está a até N dias.
+    warningDays: 90
+    # Sem produto informado na aplicação, procura pelo nome/repositório na lista do endoflife.date.
+    autoMatch: true
   # Se true, o arquivo de seed (abaixo) sobrescreve alterações feitas pela UI.
   seedOverwrite: false
   # Variáveis extras (não secretas).

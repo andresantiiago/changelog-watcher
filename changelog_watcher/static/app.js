@@ -471,6 +471,19 @@ function updatesCell(s) {
   return parts.length ? `<div class="upd">${parts.join("")}</div>` : `<span class="muted">—</span>`;
 }
 
+const EOL = { eol: { label: "EOL atingido", cls: "eol" }, soon: { label: "EOL próximo", cls: "soon" }, ok: { label: "Com suporte", cls: "ok" } };
+/** "em 42 dias" / "há 10 dias" / "hoje" for a deployment's end of life. */
+function eolWhen(s) {
+  if (s.eol_days_left == null) return s.eol_status === "eol" ? "já atingido" : (s.eol_status === "ok" ? "sem data anunciada" : "—");
+  const n = s.eol_days_left;
+  return `${fmtDate(s.eol_date)} · ${n > 0 ? `em ${num(n)} dias` : n === 0 ? "hoje" : `há ${num(-n)} dias`}`;
+}
+/** Chip shown next to the version when the cycle in use is close to (or past) its end of life. */
+function eolChip(s) {
+  if (s.eol_status !== "eol" && s.eol_status !== "soon") return "";
+  return `<span class="chip eol-${s.eol_status}" title="${esc(`${s.eol_product} ${s.eol_cycle}: fim de suporte ${eolWhen(s)}`)}">${EOL[s.eol_status].label}</span>`;
+}
+
 // ------------------------------------------------------------- dashboard
 async function viewDashboard(view) {
   const q = `?${S.envFilter ? `environment_id=${S.envFilter}&` : ""}${S.nsFilter ? `namespace=${encodeURIComponent(S.nsFilter)}` : ""}`;
@@ -506,6 +519,14 @@ async function viewDashboard(view) {
       <div class="card"><div class="card-head"><h2>% atualizado ao longo do tempo</h2></div><div class="chart" id="ch-trend"></div><div id="lg-trend"></div></div>
       <div class="card"><div class="card-head"><h2>Envelhecimento do ambiente (libyears)</h2><span class="sub">média por implantação · quanto maior, mais antigo</span></div><div class="chart" id="ch-lib"></div><div id="lg-lib"></div></div>
     </div>
+    ${d.eol.length ? `<div class="card" style="margin-top:16px">
+      <div class="card-head"><h2>Fim de suporte (EOL)</h2><span class="sub">ciclos em uso sem suporte ou que perdem suporte em até ${num(S.meta.eol?.warning_days)} dias · <a href="#" id="eol-all">ver todas</a></span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Aplicação</th><th>Ambiente</th><th>Em uso</th><th>Ciclo</th><th>Situação</th><th>Fim de suporte</th></tr></thead>
+        <tbody>${d.eol.map((s) => `<tr class="clickable" data-href="#/apps/${s.project_id}"><td><b>${esc(s.project)}</b></td><td>${esc(s.environment)}</td><td>${ver(s.current_version)}</td>
+          <td>${esc(s.eol_product)} <b>${esc(s.eol_cycle)}</b>${s.eol_cycle_latest ? ` <span class="small muted">(última ${esc(s.eol_cycle_latest)})</span>` : ""}</td><td>${eolChip(s)}</td><td class="nowrap">${eolWhen(s)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </div>` : ""}
     <div class="card" style="margin-top:16px">
       <div class="card-head"><h2>Mais desatualizadas</h2><a class="small" href="#/apps">ver todas</a></div>
       <div class="table-wrap"><table>
@@ -528,6 +549,7 @@ async function viewDashboard(view) {
   filter.bind(view);
   $("#ns-filter", view)?.addEventListener("change", (e) => { S.nsFilter = e.target.value; route(); });
   bindRowLinks(view);
+  $("#eol-all", view)?.addEventListener("click", (e) => { e.preventDefault(); goTo({ status: "eol_any", env: S.envFilter }); });
 
   stackedBars($("#ch-status", view), d.environments.map((e) => ({ label: e.environment, envId: e.environment_id, values: e.counts })), STATUS_KEYS, statusColor, (k) => STATUS[k].label, (row, k) => goTo({ status: k, env: row.envId }));
   columnChart($("#ch-age", view), Object.entries(o.age_buckets).map(([label, value]) => ({ label, value, hint: "Implantações desatualizadas" })));
@@ -561,7 +583,7 @@ async function viewApps(view) {
   view.innerHTML = `
     <div class="filters">
       <input type="search" id="f-q" placeholder="Buscar aplicação…" value="${esc(st.q)}">
-      <select id="f-status"><option value="">Todos os status</option>${STATUS_KEYS.map((k) => opt(k, STATUS[k].label, st.status)).join("")}<option value="outdated" ${st.status === "outdated" ? "selected" : ""}>Qualquer atualização</option>${opt("has_patch", "Qualquer bugfix pendente", st.status)}${opt("has_minor", "Qualquer minor pendente", st.status)}${opt("has_major", "Qualquer major pendente", st.status)}</select>
+      <select id="f-status"><option value="">Todos os status</option>${STATUS_KEYS.map((k) => opt(k, STATUS[k].label, st.status)).join("")}<option value="outdated" ${st.status === "outdated" ? "selected" : ""}>Qualquer atualização</option>${opt("has_patch", "Qualquer bugfix pendente", st.status)}${opt("has_minor", "Qualquer minor pendente", st.status)}${opt("has_major", "Qualquer major pendente", st.status)}${opt("eol_any", "Fim de suporte próximo ou atingido", st.status)}${opt("eol", "Fim de suporte atingido", st.status)}</select>
       ${S.envs.length > 1 ? `<select id="f-env" aria-label="Ambiente"><option value="">Todos os ambientes</option>${S.envs.map((e) => opt(e.id, e.name, st.env)).join("")}</select>` : ""}
       ${allTags.length ? `<select id="f-tag"><option value="">Todas as tags</option>${allTags.map((t) => opt(t, t, st.tag)).join("")}</select>` : ""}
       ${namespaces.length ? `<select id="f-ns" aria-label="Namespace"><option value="">Todos os namespaces</option>${namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}
@@ -581,6 +603,8 @@ async function viewApps(view) {
       const ss = S.envs.filter((e) => !st.env || String(e.id) === st.env).map((e) => byKey[`${p.id}:${e.id}`]).filter(Boolean);
       if (st.env && !ss.length) return false;
       if (st.status === "outdated") return ss.some((s) => ["patch", "minor", "major"].includes(s.status));
+      if (st.status === "eol_any") return ss.some((s) => s.eol_status === "eol" || s.eol_status === "soon");
+      if (st.status === "eol") return ss.some((s) => s.eol_status === "eol");
       if (st.status.startsWith("has_")) return ss.some((s) => s[`latest_${st.status.slice(4)}`]);
       if (st.status) return ss.some((s) => s.status === st.status);
       return true;
@@ -597,7 +621,7 @@ async function viewApps(view) {
         ${S.envs.map((e) => {
           const s = byKey[`${p.id}:${e.id}`];
           if (!s) return `<td class="muted small">não implantado</td>`;
-          return `<td><div class="cell-ver">${ver(s.current_version)} ${badge(s.status)} ${updatesCell(s)}
+          return `<td><div class="cell-ver">${ver(s.current_version)} ${badge(s.status)} ${eolChip(s)} ${updatesCell(s)}
             ${s.detection_error ? `<span class="err" data-err="${esc(s.detection_error)}" title="Clique para ver o erro">⚠ detecção falhou</span>` : ""}</div></td>`;
         }).join("")}
         <td>${ver(any?.latest_version)}<div class="small muted">${any?.latest_version_date ? fmtDate(any.latest_version_date) : ""}</div></td>
@@ -642,6 +666,9 @@ function projectForm(p = null, isNew = !p, hint = {}) {
       ${field("Esquema de versão", `<select name="version_scheme">${opt("semver", "SemVer – major.minor.patch", p.version_scheme)}${opt("major_patch", "major.bugfix (ex: PostgreSQL 16.2)", p.version_scheme)}</select>`)}
       <label class="check"><input type="checkbox" name="include_prerelease" ${p.include_prerelease ? "checked" : ""}> Considerar pre-releases (rc, beta…)</label>
     </div></fieldset>
+    ${S.meta.eol?.enabled ? `<fieldset><legend>Fim de suporte (EOL)</legend><div class="form-grid">
+      ${field("Produto no endoflife.date", `${inp("eol_product", p.eol_product, `list="eol-products" autocomplete="off" placeholder="${esc(p.eol_data?.product && !p.eol_product ? `automático: ${p.eol_data.product}` : (S.meta.eol.auto_match ? "automático pelo nome/repositório" : "ex: postgresql"))}"`)}<datalist id="eol-products"></datalist>`, 'ex: <code>postgresql</code>, <code>kubernetes</code>, <code>redis</code> · vazio = procura pelo nome · <code>none</code> desativa · <a href="https://endoflife.date" target="_blank" rel="noopener">endoflife.date</a> <span id="eol-hint"></span>', "full")}
+    </div></fieldset>` : ""}
     <fieldset><legend>Descobrir versão em uso via Prometheus</legend><div class="form-grid">
       ${field("Modo de detecção", `<select name="detection_mode">${Object.entries(S.meta.detection_modes).map(([k, v]) => opt(k, v, p.detection_mode)).join("")}</select>`, "usa <code>kube_pod_container_info</code> do kube-state-metrics", "full")}
       <div data-mode="workload">${field("Tipo de workload", `<select name="workload_kind">${["deployment", "statefulset", "daemonset", "cronjob"].map((k) => opt(k, k, p.workload_kind)).join("")}</select>`)}</div>
@@ -730,6 +757,13 @@ function projectForm(p = null, isNew = !p, hint = {}) {
     }
   };
   $("#repo-suggest-btn", form).addEventListener("click", (e) => { e.preventDefault(); suggest(); });
+  if (S.meta.eol?.enabled) {
+    api(`/api/eol/products${isNew ? "" : `?project_id=${p.id}`}`).then((r) => {
+      $("#eol-products", form).innerHTML = r.products.map((x) => `<option value="${esc(x)}">`).join("");
+      if (r.error) $("#eol-hint", form).textContent = `· ${r.error}`;
+      else if (r.suggested && !p.eol_product) $("#eol-hint", form).textContent = `· encontrado automaticamente: ${r.suggested}`;
+    }).catch(() => { /* autocomplete only */ });
+  }
   if (isNew && !p.repository && (hint.image || hint.chart)) suggest();
 }
 
@@ -746,6 +780,7 @@ async function viewAppDetail(view, id) {
         <div class="small muted" style="margin-top:4px">${esc(S.meta.source_types[p.source_type] || p.source_type)} · ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(p.repository)}</a>` : esc(p.repository)} · ${p.release_count} versões conhecidas · verificado ${rel(p.last_checked_at)}</div>
         ${p.description ? `<p style="margin:8px 0 0">${esc(p.description)}</p>` : ""}
         ${p.last_error ? `<div class="err" data-err="${esc(p.last_error)}" style="margin-top:6px">⚠ ${esc(p.last_error)}</div>` : ""}
+        ${p.eol_error ? `<div class="err" data-err="${esc(p.eol_error)}" style="margin-top:6px">⚠ ${esc(p.eol_error)}</div>` : ""}
       </div>
       <div class="row"><button class="btn" id="d-refresh" type="button">↻ Buscar releases</button><button class="btn" id="d-edit" type="button">Editar</button><button class="btn danger" id="d-del" type="button">Excluir</button></div></div>
     </div>
@@ -761,6 +796,7 @@ async function viewAppDetail(view, id) {
           <tr><td class="muted">Major</td><td>${s.latest_major ? `${s.latest_major_url ? `<a href="${esc(s.latest_major_url)}" target="_blank" rel="noopener">${esc(s.latest_major)}</a>` : esc(s.latest_major)} <span class="small muted">(${s.major_behind} atrás)</span>` : "—"}</td></tr>
           <tr><td class="muted">Atrasada há</td><td>${s.outdated_since ? `${days(s.outdated_days)} <span class="small muted">(desde ${fmtDate(s.outdated_since)})</span>` : "—"}</td></tr>
           <tr><td class="muted">Libyears</td><td class="num">${s.libyears == null ? "—" : num(s.libyears, 2)}</td></tr>
+          ${s.eol_product ? `<tr><td class="muted">Fim de suporte</td><td>${s.eol_cycle ? `${esc(s.eol_product)} <b>${esc(s.eol_cycle)}</b> · ${eolWhen(s)} ${eolChip(s)}` : `<span class="muted">ciclo de ${esc(s.current_version || "?")} não encontrado em ${esc(s.eol_product)}</span>`}</td></tr>` : ""}
         </tbody></table>
         <div class="row" style="margin-top:10px">
           ${s.versions_behind ? `<button class="btn sm" data-notes="${s.environment_id}" type="button">Ver changelog pendente (${s.versions_behind})</button>` : ""}

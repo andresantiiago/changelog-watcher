@@ -24,6 +24,9 @@ VersionSource = Literal["manual", "prometheus"]
 WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
 
 
+_EOL_SLUG = re.compile(r"[a-z0-9][a-z0-9._+-]*")
+
+
 def _check_regex(value: str | None) -> str | None:
     if value:
         try:
@@ -94,11 +97,21 @@ class ProjectIn(BaseModel):
     image_pattern: str | None = None
     promql_query: str | None = None
     image_version_pattern: str | None = None
+    # endoflife.date product (e.g. "postgresql"); empty = automatic match, "none" = no EOL check.
+    eol_product: str | None = Field(default=None, max_length=100)
     # environment_id -> deployment settings. Missing environments are removed
     # when ``deployments`` is sent; ``None`` leaves deployments untouched.
     deployments: dict[int, DeploymentIn] | None = None
 
     _tag = field_validator("tag_pattern", "image_version_pattern")(_check_regex)
+
+    @field_validator("eol_product")
+    @classmethod
+    def _eol_product(cls, value: str | None) -> str | None:
+        value = (value or "").strip().lower()
+        if value and not _EOL_SLUG.fullmatch(value):
+            raise ValueError("produto inválido: use o identificador do endoflife.date, ex: postgresql")
+        return value or None
 
 
 class ProjectOut(ProjectIn):
@@ -107,6 +120,9 @@ class ProjectOut(ProjectIn):
     repository: str  # no min_length: seeded projects may lack one
     last_checked_at: datetime | None = None
     last_error: str | None = None
+    eol_data: dict | None = None
+    eol_checked_at: datetime | None = None
+    eol_error: str | None = None
     release_count: int = 0
     deployments: list[DeploymentOut] = Field(default_factory=list)
 

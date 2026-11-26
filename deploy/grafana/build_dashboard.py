@@ -48,6 +48,14 @@ LEVEL_MAPPING = [{
         "3": {"text": "Major", "color": STATUS_COLORS["major"], "index": 4},
     },
 }]
+EOL_MAPPING = [{
+    "type": "value",
+    "options": {
+        "0": {"text": "Com suporte", "color": STATUS_COLORS["up_to_date"], "index": 0},
+        "1": {"text": "EOL próximo", "color": STATUS_COLORS["minor"], "index": 1},
+        "2": {"text": "EOL atingido", "color": STATUS_COLORS["major"], "index": 2},
+    },
+}]
 
 _id = 0
 
@@ -298,6 +306,52 @@ def build() -> dict:
     }
     panels.append(level_ts)
     y += 10
+
+    # ------------------------------------------------------------ end of life
+    panels.append(row("Fim de suporte (EOL)", y)); y += 1
+    panels.append(stat("EOL atingido", f'sum(changelog_watcher_environment_apps_eol{{{ENV}, status="eol"}})',
+                       0, y, w=4, h=4, steps=[(None, "text"), (1, STATUS_COLORS["major"])],
+                       description="Implantações cujo ciclo em uso já está sem suporte (endoflife.date)."))
+    panels.append(stat("EOL próximo", f'sum(changelog_watcher_environment_apps_eol{{{ENV}, status="soon"}})',
+                       0, y + 4, w=4, h=4, steps=[(None, "text"), (1, STATUS_COLORS["minor"])],
+                       description="Implantações cujo ciclo em uso perde suporte dentro do prazo de aviso "
+                                   "(EOL_WARNING_DAYS)."))
+    eol_table = {
+        "id": nid(), "type": "table", "title": "Fim de suporte do ciclo em uso", "datasource": DS,
+        "description": "Ciclo de cada implantação segundo o endoflife.date e os dias até o fim do suporte "
+                       "(negativo: já passou).",
+        "gridPos": {"x": 4, "y": y, "w": 20, "h": 8},
+        "targets": [
+            target(f"changelog_watcher_app_eol_level{{{ENV}, {PROJ}}}", ref="A", instant=True, table=True),
+            target(f"changelog_watcher_app_eol_days_left{{{ENV}, {PROJ}}}", ref="B", instant=True, table=True),
+        ],
+        "transformations": [
+            {"id": "merge", "options": {}},
+            {"id": "organize", "options": {
+                "excludeByName": {"Time": True, "__name__": True, "instance": True, "job": True, "namespace": True,
+                                  "pod": True, "service": True, "endpoint": True, "container": True},
+                "indexByName": {"project": 0, "environment": 1, "product": 2, "cycle": 3, "Value #A": 4,
+                                "Value #B": 5},
+                "renameByName": {"project": "Aplicação", "environment": "Ambiente", "product": "Produto",
+                                 "cycle": "Ciclo", "Value #A": "Suporte", "Value #B": "Dias até o EOL"}}},
+            {"id": "sortBy", "options": {"sort": [{"field": "Dias até o EOL"}]}},
+        ],
+        "fieldConfig": {
+            "defaults": {"custom": {"align": "auto", "filterable": True, "cellOptions": {"type": "auto"}},
+                         "noValue": "—"},
+            "overrides": [
+                {"matcher": {"id": "byName", "options": "Suporte"},
+                 "properties": [{"id": "mappings", "value": EOL_MAPPING},
+                                {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "basic"}},
+                                {"id": "custom.width", "value": 140}]},
+                {"matcher": {"id": "byName", "options": "Dias até o EOL"},
+                 "properties": [{"id": "decimals", "value": 0}]},
+            ],
+        },
+        "options": {"showHeader": True, "cellHeight": "sm", "footer": {"show": False}},
+    }
+    panels.append(eol_table)
+    y += 8
 
     # -------------------------------------------------------- releases/health
     panels.append(row("Novas versões e saúde da coleta", y)); y += 1

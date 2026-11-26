@@ -11,7 +11,7 @@ import httpx
 from . import safehttp
 from .config import expand_env, get_settings
 from .models import Report, Webhook, utcnow
-from .report import STATUS_ICON, _pct
+from .report import EOL_ICON, STATUS_ICON, _pct, eol_when
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
     out["drift"] = [r for r in out["drift"]
                     if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1]
     out["drift_pairs"] = [p for p in data["drift_pairs"] if p["source"] in names and p["target"] in names]
+    out["eol"] = [o for o in data.get("eol") or [] if o["environment_id"] in ids]
     return out
 
 
@@ -76,6 +77,14 @@ def chat_lines(data: dict, max_items: int = 25) -> list[str]:
         )
     if len(outdated) > max_items:
         lines.append(f"• … e mais {len(outdated) - max_items}")
+    eol = data.get("eol") or []
+    if eol:
+        lines += ["", f"**Fim de suporte (EOL) ({len(eol)})**"]
+        for o in eol[:max_items]:
+            lines.append(f"• {EOL_ICON[o['eol_status']]} {o['environment']} · {o['project']} {o['current_version']} "
+                         f"({o['eol_product']} {o['eol_cycle']}): {eol_when(o)}")
+        if len(eol) > max_items:
+            lines.append(f"• … e mais {len(eol) - max_items}")
     if data["drift"]:
         env_names = {str(e["id"]): e["name"] for e in data["environments"]}
         lines += ["", f"**Diferenças entre ambientes ({len(data['drift'])})**"]
@@ -129,7 +138,7 @@ def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
 
 async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: httpx.AsyncClient) -> dict:
     data = filter_data(data, webhook.environment_ids)
-    if webhook.only_outdated and not any(o["status"] != "unknown" for o in data["outdated"]):
+    if webhook.only_outdated and not data.get("eol") and not any(o["status"] != "unknown" for o in data["outdated"]):
         return {"webhook": webhook.name, "ok": True, "skipped": True, "detail": "nada desatualizado"}
     url = expand_env(webhook.url)
     if not url:
