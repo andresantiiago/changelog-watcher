@@ -130,10 +130,10 @@ auth:
 # Loaded on every start; by default it only creates what does not exist yet.
 seed:
   environments: []
-  #  - name: desenvolvimento
+  #  - name: development
   #    prometheus_url: http://prometheus-dev.monitoring:9090
-  #  - name: producao
-  #    prometheus_url: https://thanos.empresa.com
+  #  - name: production
+  #    prometheus_url: https://thanos.example.com
   #    prometheus_auth: bearer
   #    prometheus_token: ${PROM_PROD_TOKEN}
   #    prometheus_extra_selector: cluster="prod"
@@ -147,10 +147,10 @@ seed:
   #    workload_name: argocd-server
   #    container_name: server
   #    deployments:
-  #      desenvolvimento: {}            # version via Prometheus
-  #      producao: {}
+  #      development: {}                # version via Prometheus
+  #      production: {}
   webhooks: []
-  #  - name: slack-plataforma
+  #  - name: slack-platform
   #    kind: slack
   #    url: ${SLACK_WEBHOOK_URL}
 
@@ -206,4 +206,4 @@ grafana:
     labels:
       grafana_dashboard: "1"
     annotations: {}
-    #  grafana_folder: Plataforma
+    #  grafana_folder: Platform

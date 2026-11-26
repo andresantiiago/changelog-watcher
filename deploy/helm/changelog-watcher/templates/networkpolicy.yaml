@@ -1,5 +1,5 @@
 {{- define "cw.networkPolicyDNS" -}}
-# DNS (kube-dns, NodeLocal DNSCache etc.): sem ele nenhum nome resolve.
+# DNS (kube-dns, NodeLocal DNSCache etc.): without it no name resolves.
 - ports:
     - {protocol: UDP, port: 53}
     - {protocol: TCP, port: 53}
@@ -18,16 +18,16 @@ spec:
     matchLabels: {{- include "cw.selectorLabels" $ | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
-    # Scrape do /metrics pelo Prometheus.
+    # /metrics scrape by Prometheus.
     - from: [{{ toJson $peer }}]
       ports: [{port: http}]
     {{- with .allowIngressFrom }}
-    # Demais origens liberadas (ingress controller etc.).
+    # Other allowed sources (ingress controller etc.).
     - from: {{- toYaml . | nindent 8 }}
       ports: [{port: http}]
     {{- end }}
   egress:
-    # Consultas à API do Prometheus/Thanos.
+    # Prometheus/Thanos API queries.
     - to: [{{ toJson $peer }}]
       {{- with .ports }}
       ports:
@@ -52,8 +52,8 @@ spec:
     matchLabels: {{- include "cw.selectorLabels" $ | nindent 6 }}
   policyTypes: [Egress]
   egress:
-    # Fontes de releases (GitHub, GitLab, Docker Hub, páginas web) e webhooks.
-    # ponytail: só IPv4; em cluster dual-stack, adicionar um ipBlock ::/0 aqui.
+    # Release sources (GitHub, GitLab, Docker Hub, web pages) and webhooks.
+    # ponytail: IPv4 only; on a dual-stack cluster, add an ipBlock ::/0 here.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

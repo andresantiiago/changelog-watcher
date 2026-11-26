@@ -55,7 +55,7 @@ def tr(name: str) -> str:
     return EN_NAMES.get(name, name) if EN else name
 PROM_URL = "http://prometheus.monitoring:9090"
 
-# name, fields, [(versão, dias atrás)], {ambiente: versão em uso}; "*" = detectada via Prometheus
+# name, fields, [(version, days ago)], {environment: version in use}; "*" = detected via Prometheus
 PROJECTS = [
     ("argo-cd", dict(tags=["plataforma", "gitops"], repository="argoproj/argo-cd", detection_mode="helm",
                      workload_namespace="argocd", workload_name="argocd", image_pattern="quay.io/argoproj/argocd",
@@ -152,6 +152,8 @@ with session_scope() as s:
         fields = {**fields, "tags": [tr(t) for t in fields.get("tags", [])]}
         if fields.get("description"):
             fields["description"] = tr(fields["description"])
+        if EN:
+            fields["repository"] = fields["repository"].replace("minha-org/minha-api", "my-org/my-api")
         p = Project(name=tr(name), last_checked_at=NOW - timedelta(minutes=random.Random(name).randint(3, 50)), **fields)
         s.add(p)
         s.flush()
@@ -189,7 +191,7 @@ with session_scope() as s:
         ratio, libyears, lib_avg = today["up_to_date_ratio"] or 0.0, today["libyears"], today["libyears_avg"] or 0.0
         total = today["total"]
         today_up = round(ratio * total)
-        drops = sorted(rnd.sample(range(5, 90), min(today_up, 3)))  # dias (para trás) em que houve atualização
+        drops = sorted(rnd.sample(range(5, 90), min(today_up, 3)))  # days (going back) with an update
         for back in range(1, 91):
             up = today_up - sum(1 for d in drops if d <= back)
             rest = total - up

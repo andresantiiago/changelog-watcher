@@ -559,7 +559,7 @@ async function viewDashboard(view) {
   $("#eol-all", view)?.addEventListener("click", (e) => { e.preventDefault(); goTo({ status: "eol_any", env: S.envFilter }); });
 
   stackedBars($("#ch-status", view), d.environments.map((e) => ({ label: e.environment, envId: e.environment_id, values: e.counts })), STATUS_KEYS, statusColor, (k) => STATUS[k].label, (row, k) => goTo({ status: k, env: row.envId }));
-  columnChart($("#ch-age", view), Object.entries(o.age_buckets).map(([label, value]) => ({ label: label === ">1 ano" ? t(">1 year") : label, value, hint: t("Outdated deployments") })));
+  columnChart($("#ch-age", view), Object.entries(o.age_buckets).map(([label, value]) => ({ label, value, hint: t("Outdated deployments") })));
 
   const byEnv = {};
   hist.forEach((h) => { (byEnv[h.environment_id] ||= []).push(h); });
