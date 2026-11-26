@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import yaml
 
+from ..i18n import _
 from .base import ReleaseData, SourceError, get_json, parse_datetime
 
 
@@ -14,7 +15,7 @@ async def fetch_index(project, client: httpx.AsyncClient, settings) -> list[Rele
     what gets compared (useful when the image tag follows the app, not the chart).
     """
     if not project.chart_name:
-        raise SourceError("informe o nome do chart (chart_name) para fontes Helm")
+        raise SourceError(_("enter the chart name (chart_name) for Helm sources"))
     url = project.repository.rstrip("/")
     if not url.endswith(".yaml"):
         url += "/index.yaml"
@@ -22,7 +23,7 @@ async def fetch_index(project, client: httpx.AsyncClient, settings) -> list[Rele
     index = yaml.safe_load(resp.text) or {}
     entries = (index.get("entries") or {}).get(project.chart_name)
     if entries is None:
-        raise SourceError(f"chart '{project.chart_name}' não encontrado em {url}")
+        raise SourceError(_("chart '{chart}' not found in {url}", chart=project.chart_name, url=url))
     seen: dict[str, ReleaseData] = {}
     for entry in entries:
         raw = entry.get("appVersion") if project.use_app_version else entry.get("version")

@@ -10,7 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import eol, logstore, safehttp
+from .i18n import _
+from . import eol, i18n, logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
@@ -75,7 +76,7 @@ def _spawn(coro) -> None:
 def _get(session: Session, model, obj_id: int):
     obj = session.get(model, obj_id)
     if obj is None:
-        raise HTTPException(404, f"{model.__name__} {obj_id} não encontrado")
+        raise HTTPException(404, _("{model} {id} not found", model=model.__name__, id=obj_id))
     return obj
 
 
@@ -84,7 +85,7 @@ def _commit(session: Session):
         session.flush()
     except IntegrityError as exc:
         session.rollback()
-        raise HTTPException(409, "já existe um registro com esse nome") from exc
+        raise HTTPException(409, _("a record with this name already exists")) from exc
 
 
 # ------------------------------------------------------------------- meta
@@ -93,9 +94,11 @@ def meta():
     s = get_settings()
     sch = effective_schedule()
     return {
-        "source_types": SOURCE_TYPES,
-        "webhook_kinds": WEBHOOK_KINDS,
-        "detection_modes": DETECTION_MODES,
+        "language": i18n.get_language(),
+        "languages": i18n.LANGUAGES,
+        "source_types": {k: _(v) for k, v in SOURCE_TYPES.items()},
+        "webhook_kinds": {k: _(v) for k, v in WEBHOOK_KINDS.items()},
+        "detection_modes": {k: _(v) for k, v in DETECTION_MODES.items()},
         "age_buckets": [b[0] for b in AGE_BUCKETS],
         "schedule": {
             "refresh_interval_minutes": sch["refresh_interval_minutes"],
@@ -125,7 +128,7 @@ def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...], url_field: str |
     for key, value in data.items():
         if key in secrets and value == SECRET_MASK:
             if url_changed:
-                raise HTTPException(422, f"informe {key} novamente ao trocar {url_field}")
+                raise HTTPException(422, _("enter {key} again when changing {url_field}", key=key, url_field=url_field))
             continue  # unchanged secret
         setattr(obj, key, value)
 
@@ -201,7 +204,7 @@ async def eol_products(project_id: int | None = None, db: Session = Depends(get_
         try:
             products = await eol.fetch_products(client, s)
         except (SourceError, httpx.HTTPError, ValueError) as exc:
-            return {"enabled": True, "products": [], "suggested": None, "error": f"endoflife.date indisponível: {exc}"}
+            return {"enabled": True, "products": [], "suggested": None, "error": _("endoflife.date unavailable: {error}", error=exc)}
     suggested = None
     if project_id is not None:
         suggested = eol.auto_match(_get(db, Project, project_id), products)
@@ -223,7 +226,7 @@ def _apply_project(db: Session, project: Project, body: ProjectIn) -> None:
         if isinstance(value, str):
             value = value.strip() or None
             if key in ("name", "repository") and value is None:
-                raise HTTPException(422, f"{key} é obrigatório")
+                raise HTTPException(422, _("{key} is required", key=key))
         setattr(project, key, value)
     if body.deployments is None:
         return
@@ -232,7 +235,7 @@ def _apply_project(db: Session, project: Project, body: ProjectIn) -> None:
     existing = {d.environment_id: d for d in project.deployments}
     for env_id, dep_in in body.deployments.items():
         if env_id not in env_ids:
-            raise HTTPException(422, f"ambiente {env_id} não existe")
+            raise HTTPException(422, _("environment {id} does not exist", id=env_id))
         dep = existing.pop(env_id, None)
         if dep is None:
             dep = Deployment(project_id=project.id, environment_id=env_id)
@@ -410,10 +413,10 @@ async def refresh(body: RefreshRequest | None = None):
     if body.wait:
         return await run_refresh(body.project_ids, detect=body.detect)
     if STATE.running:
-        return {**STATE.to_dict(), "message": "atualização já em andamento"}
+        return {**STATE.to_dict(), "message": _("refresh already running")}
     _spawn(run_refresh(body.project_ids, detect=body.detect))
     await asyncio.sleep(0)
-    return {**STATE.to_dict(), "running": True, "message": "atualização iniciada"}
+    return {**STATE.to_dict(), "running": True, "message": _("refresh started")}
 
 
 @router.get("/refresh/status")
@@ -495,7 +498,7 @@ def list_webhooks(db: Session = Depends(get_db)):
 @router.post("/webhooks", status_code=201)
 def create_webhook(body: WebhookIn, db: Session = Depends(get_db)):
     if body.url == SECRET_MASK:
-        raise HTTPException(422, "informe a URL")
+        raise HTTPException(422, _("enter the URL"))
     w = Webhook()
     _apply_body(w, body, ("url",))
     db.add(w)
@@ -525,7 +528,7 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
     data = build_report_data(db)
     async with safehttp.client(timeout=get_settings().http_timeout) as client:
         result = await send_webhook(w, data, render_markdown(data), client)
-    record_status(w, result, " (teste)")
+    record_status(w, result, _(" (test)"))
     return result
 
 
@@ -534,10 +537,12 @@ class SettingsIn(BaseModel):
     report_cron: str = Field(min_length=1)
     # upper bound: an overflowing interval is saved, then breaks the scheduler on every startup
     refresh_interval_minutes: int = Field(ge=0, le=1_000_000)
+    language: str | None = None  # omitted: unchanged
 
 
 def _settings_out() -> dict:
-    return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs()}
+    return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs(),
+            "language": i18n.get_language(), "languages": i18n.LANGUAGES}
 
 
 @router.get("/settings")
@@ -551,12 +556,19 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
     try:
         CronTrigger.from_crontab(cron)
     except ValueError as exc:
-        raise HTTPException(422, f"expressão cron inválida: {exc}") from exc
-    for key, value in (("report_cron", cron), ("refresh_interval_minutes", str(body.refresh_interval_minutes))):
+        raise HTTPException(422, _("invalid cron expression: {error}", error=exc)) from exc
+    values = [("report_cron", cron), ("refresh_interval_minutes", str(body.refresh_interval_minutes))]
+    if body.language is not None:
+        if body.language not in i18n.LANGUAGES:
+            raise HTTPException(422, _("unsupported language: {value}", value=body.language))
+        values.append(("language", body.language))
+    for key, value in values:
         row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
         row.value = value
         db.add(row)
     db.commit()
+    if body.language is not None:
+        i18n.set_language(body.language)
     reschedule()
     return _settings_out()
 

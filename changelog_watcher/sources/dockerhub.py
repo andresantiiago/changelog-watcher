@@ -4,6 +4,7 @@ import re
 
 import httpx
 
+from ..i18n import _
 from ..versioning import parse_version
 from .base import ReleaseData, SourceError, get_json, parse_datetime
 
@@ -22,7 +23,7 @@ def _repo(project) -> str:
     if "/" not in repo:
         repo = f"library/{repo}"
     if repo.count("/") != 1:
-        raise SourceError(f"imagem Docker Hub inválida: '{project.repository}'")
+        raise SourceError(_("invalid Docker Hub image: '{repo}'", repo=project.repository))
     return repo
 
 

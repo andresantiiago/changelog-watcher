@@ -17,6 +17,7 @@ from datetime import date, datetime, timezone
 import httpx
 
 from .config import get_settings
+from .i18n import _
 from .db import session_scope
 from .models import Project, utcnow
 from .sources.base import SourceError, get_json
@@ -51,7 +52,7 @@ async def fetch_products(client: httpx.AsyncClient, settings=None) -> list[str]:
         return _products_cache[1]
     data = (await get_json(client, f"{settings.eol_api_url}/all.json")).json()
     if not isinstance(data, list):
-        raise SourceError("resposta inesperada do endoflife.date (lista de produtos)")
+        raise SourceError(_("unexpected response from endoflife.date (product list)"))
     products = sorted({str(p).strip().lower() for p in data if isinstance(p, str) and _SLUG.fullmatch(p.strip().lower())})
     _products_cache = (time.monotonic(), products)
     return products
@@ -84,10 +85,10 @@ def normalize_cycle(item: dict) -> dict | None:
 async def fetch_cycles(client: httpx.AsyncClient, product: str, settings=None) -> list[dict]:
     settings = settings or get_settings()
     if not _SLUG.fullmatch(product):
-        raise SourceError(f"produto inválido: {product}")
+        raise SourceError(_("invalid product: {product}", product=product))
     data = (await get_json(client, f"{settings.eol_api_url}/{product}.json")).json()
     if not isinstance(data, list):
-        raise SourceError(f"resposta inesperada do endoflife.date para {product}")
+        raise SourceError(_("unexpected response from endoflife.date for {product}", product=product))
     return [c for c in (normalize_cycle(i) for i in data if isinstance(i, dict)) if c]
 
 
@@ -202,8 +203,8 @@ async def refresh_eol(project_ids: list[int], client: httpx.AsyncClient) -> list
         try:
             products = await fetch_products(client, settings)
         except (SourceError, httpx.HTTPError, ValueError) as exc:
-            errors.append(f"EOL: lista de produtos do endoflife.date: {exc}")
-            log.warning("EOL: falha ao buscar a lista de produtos: %s", exc)
+            errors.append(_("EOL: endoflife.date product list: {error}", error=exc))
+            log.warning("EOL: failed to fetch the product list: %s", exc)
 
     sem = asyncio.Semaphore(6)
 

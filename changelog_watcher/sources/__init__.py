@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 
 from ..analysis import pv
+from ..i18n import _
 from . import changelog, dockerhub, github, gitlab, helm
 from .base import ReleaseData, SourceError
 
@@ -13,10 +14,10 @@ SOURCE_TYPES = {
     "github_tags": "GitHub Tags",
     "gitlab_releases": "GitLab Releases",
     "gitlab_tags": "GitLab Tags",
-    "helm_index": "Repositório Helm (index.yaml)",
+    "helm_index": "Helm repository (index.yaml)",
     "dockerhub": "Docker Hub (tags)",
-    "changelog": "Arquivo CHANGELOG.md",
-    "webpage": "Página web com as versões",
+    "changelog": "CHANGELOG.md file",
+    "webpage": "Web page listing the versions",
 }
 
 # Every fetcher takes (project, client, settings, known_dates, hints).
@@ -39,7 +40,7 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings, known_dat
     look up older release lines explicitly)."""
     st = project.source_type
     if st not in _FETCHERS:
-        raise SourceError(f"tipo de fonte desconhecido: {st}")
+        raise SourceError(_("unknown source type: {type}", type=st))
     releases = await _FETCHERS[st](project, client, settings, known_dates, hints)
     if st == "changelog":  # already the changelog itself: nothing to enrich
         return releases

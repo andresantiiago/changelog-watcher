@@ -76,7 +76,7 @@ def test_detect_no_series():
     try:
         asyncio.run(prom.detect(_project(), None, env))
     except prom.PrometheusError as exc:
-        assert "nenhuma série" in str(exc)
+        assert "no series" in str(exc)
     else:
         raise AssertionError("expected error")
 
@@ -238,6 +238,6 @@ def test_instant_query_non_json_is_prometheus_error():
     try:
         asyncio.run(prom.instant_query(env, "up"))
     except prom.PrometheusError as exc:
-        assert "inválida" in str(exc)
+        assert "invalid" in str(exc)
     else:
         raise AssertionError("expected error")

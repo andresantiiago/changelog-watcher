@@ -29,8 +29,8 @@ def make_engine(url: str):
     """A new SQLite engine for ``url``. For an in-memory URL that is a new, empty database."""
     if not url.startswith("sqlite"):
         raise ValueError(
-            f"DATABASE_URL inválida ({url.split(':', 1)[0]}): apenas SQLite é suportado "
-            "(sqlite:////data/changelog-watcher.db ou sqlite:///:memory:)"
+            f"invalid DATABASE_URL ({url.split(':', 1)[0]}): only SQLite is supported "
+            "(sqlite:////data/changelog-watcher.db or sqlite:///:memory:)"
         )
     kwargs: dict = {"pool_pre_ping": True, "connect_args": {"check_same_thread": False}}
     if is_memory(url):

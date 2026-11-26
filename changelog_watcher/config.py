@@ -42,6 +42,7 @@ class Settings:
     scheduler_enabled: bool = True
     metrics_cache_seconds: int = 30
     log_level: str = "INFO"
+    language: str = "en"  # en | pt-BR (overridden by the Settings page)
     eol_enabled: bool = True
     eol_api_url: str = "https://endoflife.date/api"
     eol_warning_days: int = 90
@@ -74,6 +75,7 @@ class Settings:
             scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), cls.scheduler_enabled),
             metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS") or cls.metrics_cache_seconds),
             log_level=e("LOG_LEVEL") or cls.log_level,
+            language=e("APP_LANGUAGE") or cls.language,
             eol_enabled=_bool(e("EOL_ENABLED"), cls.eol_enabled),
             eol_api_url=e("EOL_API_URL", cls.eol_api_url).rstrip("/"),
             eol_warning_days=int(e("EOL_WARNING_DAYS") or cls.eol_warning_days),
@@ -106,7 +108,7 @@ def expand_env(value: str | None) -> str | None:
     if not m:
         return value
     if m.group(1) in _APP_SECRETS:
-        log.warning("placeholder ${%s} não permitido (credencial da própria aplicação)", m.group(1))
+        log.warning("placeholder ${%s} not allowed (the application's own credential)", m.group(1))
         return ""
     return os.environ.get(m.group(1), m.group(2) or "")
 

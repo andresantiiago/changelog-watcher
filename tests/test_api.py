@@ -105,7 +105,7 @@ def test_report_and_webhooks(client, seeded):
                                        "environment_ids": [seeded["dev"]["id"]]})
     r = client.post("/api/reports", json={"send": True}).json()
     assert "1.1.3" in r["markdown"] and "bugfix **1.1.7**" in r["markdown"]
-    assert "Diferenças entre ambientes" in r["markdown"]
+    assert "Differences between environments" in r["markdown"]
     assert all(d["ok"] for d in r["delivery"]), r["delivery"]
     slack_body = slack.calls[0].request.content.decode()
     assert "*producao*" in slack_body
@@ -167,7 +167,7 @@ def test_refresh_with_github(client, seeded):
     a = _by(client.get("/api/status").json(), "app-a", "producao")
     assert a["latest_major"] == "2.2.0"
     projects = {p["name"]: p for p in client.get("/api/projects").json()}
-    assert "não encontrado" in projects["app-b"]["last_error"]
+    assert "not found" in projects["app-b"]["last_error"]
 
 
 def test_seed(tmp_path, client):
@@ -224,7 +224,7 @@ def test_only_sqlite_is_supported():
 
     from changelog_watcher.db import make_engine
 
-    with pytest.raises(ValueError, match="apenas SQLite"):
+    with pytest.raises(ValueError, match="only SQLite"):
         make_engine("postgresql+psycopg://u:p@h/db")
 
 

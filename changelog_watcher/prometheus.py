@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from .i18n import _
 from . import safehttp
 from .config import expand_env
 from .suggest import chart_name as _chart_name
@@ -70,7 +71,7 @@ def build_query(project, deployment, environment) -> str:
     mode = project.detection_mode
     if mode == "workload":
         if not namespace or not name:
-            raise PrometheusError("defina namespace e nome do workload")
+            raise PrometheusError(_("set the namespace and workload name"))
         suffix = _POD_SUFFIX.get(project.workload_kind or "deployment", _POD_SUFFIX["deployment"])
         matchers = [f'namespace="{_q(namespace)}"', f'pod=~"{_q(re.escape(name))}{_q(suffix)}"']
         if project.container_name:
@@ -78,7 +79,7 @@ def build_query(project, deployment, environment) -> str:
         return "kube_pod_container_info{" + ", ".join(matchers) + extra + "}"
     if mode == "helm":
         if not namespace or not name:
-            raise PrometheusError("defina namespace e nome do release Helm")
+            raise PrometheusError(_("set the namespace and Helm release name"))
         ns = f'namespace="{_q(namespace)}"'
         filt = f', container="{_q(project.container_name)}"' if project.container_name else ""
         if project.image_pattern:  # pick one image when the release runs several (app + redis + ...)
@@ -92,7 +93,7 @@ def build_query(project, deployment, environment) -> str:
         return f"({by_label}) or ({by_prefix} unless on() {by_label})"
     if mode == "image":
         if not project.image_pattern:
-            raise PrometheusError("defina o padrão de imagem")
+            raise PrometheusError(_("set the image pattern"))
         matchers = [f'image=~"{_q(_image_regex(project.image_pattern))}"']
         if namespace:
             matchers.append(f'namespace="{_q(namespace)}"')
@@ -101,14 +102,14 @@ def build_query(project, deployment, environment) -> str:
         return "kube_pod_container_info{" + ", ".join(matchers) + extra + "}"
     if mode == "query":
         if not project.promql_query:
-            raise PrometheusError("defina a consulta PromQL")
+            raise PrometheusError(_("set the PromQL query"))
         return project.promql_query.replace("{namespace}", namespace or "").replace("{name}", name or "")
-    raise PrometheusError("detecção via Prometheus desabilitada para esta aplicação")
+    raise PrometheusError(_("Prometheus detection disabled for this application"))
 
 
 async def instant_query(environment, promql: str, timeout: float = 15.0) -> list[dict]:
     if not environment.prometheus_url:
-        raise PrometheusError(f"ambiente '{environment.name}' sem URL do Prometheus")
+        raise PrometheusError(_("environment '{env}' has no Prometheus URL", env=environment.name))
     url = expand_env(environment.prometheus_url).rstrip("/") + "/api/v1/query"
     headers, auth = {}, None
     if environment.prometheus_auth == "bearer" and environment.prometheus_token:
@@ -119,18 +120,18 @@ async def instant_query(environment, promql: str, timeout: float = 15.0) -> list
         async with safehttp.client(timeout=timeout, verify=environment.prometheus_verify_tls, auth=auth) as client:
             resp = await client.get(url, params={"query": promql}, headers=headers)
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
-        raise PrometheusError(f"falha ao consultar Prometheus: {exc}") from exc
+        raise PrometheusError(_("failed to query Prometheus: {error}", error=exc)) from exc
     # Never echo the body: the URL is user-configured, so it would turn this into an SSRF read.
     if resp.status_code >= 400:
-        raise PrometheusError(f"Prometheus respondeu HTTP {resp.status_code}")
+        raise PrometheusError(_("Prometheus answered HTTP {status}", status=resp.status_code))
     try:
         body = resp.json()
     except ValueError:
         body = None
     if not isinstance(body, dict):  # e.g. an HTML login page answered with 200
-        raise PrometheusError("resposta inválida: não é a API do Prometheus (confira a URL)")
+        raise PrometheusError(_("invalid response: not the Prometheus API (check the URL)"))
     if body.get("status") != "success":
-        raise PrometheusError(f"erro na consulta: {body.get('error')}")
+        raise PrometheusError(_("query error: {error}", error=body.get("error")))
     return body.get("data", {}).get("result", [])
 
 
@@ -185,9 +186,9 @@ async def detect(project, deployment, environment) -> Detection:
     det = pick_version(series, project.image_version_pattern, project.version_scheme == "major_patch", prefer=name)
     det.query = query
     if not series:
-        raise PrometheusError(f"nenhuma série encontrada para: {query}")
+        raise PrometheusError(_("no series found for: {query}", query=query))
     if det.version is None:
-        raise PrometheusError(f"não foi possível extrair versão da imagem '{det.image}'")
+        raise PrometheusError(_("could not extract a version from image '{image}'", image=det.image))
     return det
 
 

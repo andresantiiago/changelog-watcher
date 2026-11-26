@@ -13,6 +13,8 @@ import socket
 
 import httpx
 
+from .i18n import _
+
 
 class BlockedDestination(httpx.RequestError):
     pass
@@ -33,7 +35,7 @@ async def _guard(request: httpx.Request) -> None:
     # not caught; pin the resolved IP in a custom transport if that threat matters.
     ips = [ipaddress.ip_address(info[4][0].split("%", 1)[0]) for info in infos]
     if any(_blocked(ip) for ip in ips):
-        raise BlockedDestination(f"destino não permitido: {host}", request=request)
+        raise BlockedDestination(_("destination not allowed: {host}", host=host), request=request)
 
 
 def client(**kwargs) -> httpx.AsyncClient:
