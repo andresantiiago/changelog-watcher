@@ -82,6 +82,13 @@ class Project(Base):
     promql_query: Mapped[str | None] = mapped_column(Text, default=None)
     image_version_pattern: Mapped[str | None] = mapped_column(String(300), default=None)
 
+    # End of life (endoflife.date): product slug; empty = match automatically, "none" = disabled.
+    eol_product: Mapped[str | None] = mapped_column(String(100), default=None)
+    # {"product": slug, "cycles": [{"cycle", "eol", "latest", "release_date", "lts"}]} from the last fetch.
+    eol_data: Mapped[dict | None] = mapped_column(JSON, default=None)
+    eol_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    eol_error: Mapped[str | None] = mapped_column(Text, default=None)
+
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

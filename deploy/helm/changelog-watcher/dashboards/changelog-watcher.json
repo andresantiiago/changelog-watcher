@@ -1584,7 +1584,7 @@
     {
       "id": 21,
       "type": "row",
-      "title": "Novas versões e saúde da coleta",
+      "title": "Fim de suporte (EOL)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1596,6 +1596,320 @@
     },
     {
       "id": 22,
+      "type": "stat",
+      "title": "EOL atingido",
+      "description": "Implantações cujo ciclo em uso já está sem suporte (endoflife.date).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(changelog_watcher_environment_apps_eol{environment=~\"$environment\", status=\"eol\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              },
+              {
+                "value": 1,
+                "color": "#d03b3b"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "showPercentChange": false,
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "EOL próximo",
+      "description": "Implantações cujo ciclo em uso perde suporte dentro do prazo de aviso (EOL_WARNING_DAYS).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(changelog_watcher_environment_apps_eol{environment=~\"$environment\", status=\"soon\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              },
+              {
+                "value": 1,
+                "color": "#ec835a"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "showPercentChange": false,
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "Fim de suporte do ciclo em uso",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Ciclo de cada implantação segundo o endoflife.date e os dias até o fim do suporte (negativo: já passou).",
+      "gridPos": {
+        "x": 4,
+        "y": 65,
+        "w": 20,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "changelog_watcher_app_eol_level{environment=~\"$environment\", project=~\"$project\"}",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "changelog_watcher_app_eol_days_left{environment=~\"$environment\", project=~\"$project\"}",
+          "refId": "B",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "service": true,
+              "endpoint": true,
+              "container": true
+            },
+            "indexByName": {
+              "project": 0,
+              "environment": 1,
+              "product": 2,
+              "cycle": 3,
+              "Value #A": 4,
+              "Value #B": 5
+            },
+            "renameByName": {
+              "project": "Aplicação",
+              "environment": "Ambiente",
+              "product": "Produto",
+              "cycle": "Ciclo",
+              "Value #A": "Suporte",
+              "Value #B": "Dias até o EOL"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Dias até o EOL"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Suporte"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Com suporte",
+                        "color": "#0ca30c",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "EOL próximo",
+                        "color": "#ec835a",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "EOL atingido",
+                        "color": "#d03b3b",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Dias até o EOL"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "row",
+      "title": "Novas versões e saúde da coleta",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 26,
       "type": "table",
       "title": "Versões publicadas nos últimos 7 dias",
       "datasource": {
@@ -1604,7 +1918,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 65,
+        "y": 74,
         "w": 12,
         "h": 9
       },
@@ -1703,7 +2017,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 27,
       "type": "table",
       "title": "Falhas de coleta / detecção",
       "datasource": {
@@ -1712,7 +2026,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 65,
+        "y": 74,
         "w": 12,
         "h": 9
       },
@@ -1783,7 +2097,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 28,
       "type": "stat",
       "title": "Última atualização",
       "description": "Tempo desde o fim da última atualização.",
@@ -1793,7 +2107,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 74,
+        "y": 83,
         "w": 6,
         "h": 4
       },
@@ -1855,7 +2169,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 29,
       "type": "stat",
       "title": "Última atualização sem erros",
       "description": "",
@@ -1865,7 +2179,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 74,
+        "y": 83,
         "w": 6,
         "h": 4
       },
@@ -1935,7 +2249,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 30,
       "type": "timeseries",
       "title": "Duração das atualizações",
       "description": "",
@@ -1945,7 +2259,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 74,
+        "y": 83,
         "w": 12,
         "h": 4
       },

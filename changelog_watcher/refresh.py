@@ -18,6 +18,7 @@ from . import safehttp
 from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
+from .eol import refresh_eol
 from .models import SNAPSHOT_FIELDS, Deployment, Project, Release, Snapshot, utcnow
 from .sources import SourceError, fetch_releases
 
@@ -213,6 +214,12 @@ async def run_refresh(project_ids: list[int] | None = None, detect: bool = True)
                             log.warning("release fetch failed: %s", exc)
 
                 await asyncio.gather(*(one(pid) for pid in ids))
+                if settings.eol_enabled and ids:
+                    try:
+                        STATE.errors.extend(await refresh_eol(ids, client))
+                    except Exception as exc:  # EOL is best effort: never fails the refresh
+                        log.exception("EOL refresh failed")
+                        STATE.errors.append(f"EOL: {exc}")
             store_snapshots()
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
             log.info("atualização concluída: %s projeto(s) ok, %s com erro, %s novas versões", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)

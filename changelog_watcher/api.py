@@ -4,12 +4,13 @@ import asyncio
 from datetime import timedelta
 from itertools import islice
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import logstore, safehttp
+from . import eol, logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
@@ -57,7 +58,7 @@ from .schemas import (
     WebhookIn,
     WebhookOut,
 )
-from .sources import SOURCE_TYPES
+from .sources import SOURCE_TYPES, SourceError
 from .suggest import suggest_sources
 from .webhooks import WEBHOOK_KINDS, deliver_report, record_status, send_webhook
 
@@ -103,6 +104,7 @@ def meta():
             "next_runs": next_runs(),
         },
         "github_token": bool(s.github_token),
+        "eol": {"enabled": s.eol_enabled, "warning_days": s.eol_warning_days, "auto_match": s.eol_auto_match},
         "public_url": s.public_url,
     }
 
@@ -186,6 +188,24 @@ async def suggest_source(name: str | None = None, image: str | None = None, char
     async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
                                  headers={"User-Agent": "changelog-watcher"}) as client:
         return {"candidates": await suggest_sources(client, s, name=name, image=image, chart=chart)}
+
+
+@router.get("/eol/products")
+async def eol_products(project_id: int | None = None, db: Session = Depends(get_db)):
+    """endoflife.date products (for the form's autocomplete) and, with ``project_id``, its automatic match."""
+    s = get_settings()
+    if not s.eol_enabled:
+        return {"enabled": False, "products": [], "suggested": None, "error": None}
+    async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
+                                 headers={"User-Agent": "changelog-watcher"}) as client:
+        try:
+            products = await eol.fetch_products(client, s)
+        except (SourceError, httpx.HTTPError, ValueError) as exc:
+            return {"enabled": True, "products": [], "suggested": None, "error": f"endoflife.date indisponível: {exc}"}
+    suggested = None
+    if project_id is not None:
+        suggested = eol.auto_match(_get(db, Project, project_id), products)
+    return {"enabled": True, "products": products, "suggested": suggested, "error": None}
 
 
 # --------------------------------------------------------------- projects
@@ -334,6 +354,10 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
         "overall": overall,
         "environments": summaries_by_environment(statuses, envs),
         "most_outdated": [s.to_dict() for s in most_outdated],
+        "eol": [s.to_dict() for s in sorted(
+            (s for s in statuses if s.eol_status in ("eol", "soon")),
+            key=lambda s: (s.eol_status != "eol", s.eol_days_left if s.eol_days_left is not None else -10**6),
+        )[:15]],
         "drift_pairs": drift_pairs(statuses, envs),
         "drift_count": sum(1 for r in version_matrix(statuses) if r["drift"]),
         "projects": counts_projects,
