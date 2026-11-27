@@ -80,6 +80,9 @@ h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: var(--text-2); t
 .topbar { display: flex; align-items: center; gap: 12px; padding: 18px 28px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; }
 .topbar .spacer { flex: 1; }
 .topbar .refresh-info { color: var(--muted); font-size: 12px; text-align: right; }
+.topbar .user-info { color: var(--muted); font-size: 13px; }
+/* Read-only users (OIDC viewer group): hide the controls marked data-write (the API answers 403 anyway). */
+.read-only [data-write] { display: none !important; }
 .content { padding: 24px 28px 60px; max-width: 1400px; }
 .btn.menu-btn { display: none; }
 

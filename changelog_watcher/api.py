@@ -6,7 +6,7 @@ from itertools import islice
 
 import httpx
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -113,6 +113,13 @@ def meta(db: Session = Depends(get_db)):
         "tolerance": global_tolerance(db),
         "public_url": s.public_url,
     }
+
+
+@router.get("/me")
+def me(request: Request):
+    """Who is logged in and whether they may edit (no user: authentication disabled)."""
+    user = getattr(request.state, "user", None) or {"name": None, "edit": True, "auth": None}
+    return {"name": user["name"], "can_edit": user["edit"], "auth": user["auth"]}
 
 
 # ----------------------------------------------------------- environments
