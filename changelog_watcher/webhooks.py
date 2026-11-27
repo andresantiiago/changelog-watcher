@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
-from .i18n import _
 from . import safehttp
 from .config import expand_env, get_settings
+from .i18n import _
 from .models import Report, Webhook, utcnow
 from .report import EOL_ICON, STATUS_ICON, _pct, eol_when
 
@@ -173,7 +173,7 @@ async def deliver_report(session, report: Report, webhooks: list[Webhook]) -> li
             if not wh.enabled:
                 continue
             result = await send_webhook(wh, report.data, report.markdown, client)
-            result["sent_at"] = datetime.now(timezone.utc).isoformat()
+            result["sent_at"] = datetime.now(UTC).isoformat()
             record_status(wh, result)
             results.append(result)
             if not result["ok"]:

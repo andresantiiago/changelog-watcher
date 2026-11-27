@@ -9,9 +9,9 @@ by keyword and ignore other suffixes (``-alpine``, ``-debian`` ...).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import total_ordering
-from typing import Iterable
 
 _PRE_KEYWORDS = "alpha|beta|rc|pre|preview|dev|snapshot|milestone|nightly|canary|a|b|m"
 _PRE_RANK = {
@@ -58,7 +58,7 @@ class Version:
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Version) and self._key() == other._key()
 
-    def __lt__(self, other: "Version") -> bool:
+    def __lt__(self, other: Version) -> bool:
         return self._key() < other._key()
 
     def __hash__(self) -> int:

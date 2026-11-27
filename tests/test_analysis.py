@@ -1,3 +1,5 @@
+from datetime import UTC
+
 from changelog_watcher.analysis import compute_statuses
 from changelog_watcher.db import session_scope
 
@@ -12,14 +14,14 @@ def test_compute_statuses_environment_filter(client, seeded):
 
 
 def test_old_higher_versions_are_ignored():
-    from datetime import datetime, timezone
+    from datetime import datetime
     from types import SimpleNamespace
 
     from changelog_watcher.analysis import project_versions
     from changelog_watcher.models import Release
 
     def rel(tag, year, month=1):
-        return Release(tag=tag, published_at=datetime(year, month, 1, tzinfo=timezone.utc), prerelease=False)
+        return Release(tag=tag, published_at=datetime(year, month, 1, tzinfo=UTC), prerelease=False)
 
     proj = SimpleNamespace(tag_pattern=None, version_scheme="semver", include_prerelease=False)
     coredns = [rel("v11.0.0", 2016), rel("v10.0.0", 2016), rel("v1.14.0", 2026), rel("v1.15.0", 2026, 10)]

@@ -14,13 +14,11 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 from sqlalchemy import text
 
-from . import i18n
-from .i18n import _
-from . import __version__
+from . import __version__, i18n, logstore
 from .api import router
 from .config import get_settings
 from .db import get_engine, init_engine, is_memory, session_scope
-from . import logstore
+from .i18n import _
 from .metrics import WatcherCollector
 from .refresh import run_refresh
 from .scheduler import start_scheduler, stop_scheduler

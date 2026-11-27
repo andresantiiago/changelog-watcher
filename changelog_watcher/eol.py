@@ -17,8 +17,8 @@ from datetime import date, datetime
 import httpx
 
 from .config import get_settings
-from .i18n import _
 from .db import session_scope
+from .i18n import _
 from .models import Project
 from .sources.base import SourceError, get_json
 from .versioning import Version
