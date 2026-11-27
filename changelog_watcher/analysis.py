@@ -134,6 +134,7 @@ class DeploymentStatus:
     eol_date: str | None = None
     eol_days_left: int | None = None
     eol_status: str | None = None  # ok|soon|eol
+    eol_link: str | None = None  # vendor page of the cycle, else the product page on endoflife.date
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -488,7 +488,11 @@ function eolWhen(s) {
 /** Chip shown next to the version when the cycle in use is close to (or past) its end of life. */
 function eolChip(s) {
   if (s.eol_status !== "eol" && s.eol_status !== "soon") return "";
-  return `<span class="chip eol-${s.eol_status}" title="${esc(`${s.eol_product} ${s.eol_cycle}: ${t("end of life {when}", { when: eolWhen(s) })}`)}">${EOL[s.eol_status].label}</span>`;
+  const title = esc(`${s.eol_product} ${s.eol_cycle}: ${t("end of life {when}", { when: eolWhen(s) })}`);
+  const label = EOL[s.eol_status].label;
+  return s.eol_link
+    ? `<a class="chip eol-${s.eol_status}" href="${esc(s.eol_link)}" target="_blank" rel="noopener noreferrer" title="${title}">${label} ↗</a>`
+    : `<span class="chip eol-${s.eol_status}" title="${title}">${label}</span>`;
 }
 
 // ------------------------------------------------------------- dashboard
