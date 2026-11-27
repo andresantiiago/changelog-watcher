@@ -1043,7 +1043,7 @@ async function viewWebhooks(view) {
     <div class="filters"><span class="muted">${t("The weekly report is sent to every active webhook.")}</span><div style="flex:1"></div><button class="btn primary" id="w-new" type="button">${t("+ New webhook")}</button></div>
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>${t("Name")}</th><th>${t("Type")}</th><th>URL</th><th>${t("Environments")}</th><th>${t("Last delivery")}</th><th></th></tr></thead>
-      <tbody>${hooks.map((w) => `<tr><td><b>${esc(w.name)}</b> ${w.enabled ? "" : `<span class="chip">${t("disabled")}</span>`}${w.only_outdated ? ` <span class="chip">${t("only when something is pending")}</span>` : ""}</td>
+      <tbody>${hooks.map((w) => `<tr><td><b>${esc(w.name)}</b> ${w.enabled ? "" : `<span class="chip">${t("disabled")}</span>`}${w.only_outdated ? ` <span class="chip">${t("only when something is pending")}</span>` : ""}${w.alert_major || w.alert_security || w.alert_overdue_days ? ` <span class="chip">${t("alerts")}</span>` : ""}</td>
         <td>${esc(S.meta.webhook_kinds[w.kind] || w.kind)}</td><td class="mono small">${esc(w.url)}</td>
         <td class="small">${w.environment_ids.length ? w.environment_ids.map(envName).map(esc).join(", ") : t("all")}</td>
         <td class="small">${w.last_sent_at ? `${fmtDate(w.last_sent_at, true)}<div class="muted">${esc(w.last_status || "")}</div>` : `<span class="muted">${t("never")}</span>`}</td>
@@ -1074,6 +1074,10 @@ function hookForm(w = null) {
     <div class="full"><div class="small muted" style="margin-bottom:6px">${t("Included environments (none checked = all)")}</div><div class="pill-row">${S.envs.map((e) => `<label class="check"><input type="checkbox" data-skip="1" data-env-id="${e.id}" ${w.environment_ids.includes(e.id) ? "checked" : ""}> ${esc(e.name)}</label>`).join("")}</div></div>
     <label class="check"><input type="checkbox" name="enabled" ${w.enabled ? "checked" : ""}>${t(" Enabled")}</label>
     <label class="check"><input type="checkbox" name="only_outdated" ${w.only_outdated ? "checked" : ""}>${t(" Send only when there are outdated applications")}</label>
+    <div class="full small muted">${t("Immediate alerts, checked after every refresh (once per version and deployment):")}</div>
+    <label class="check"><input type="checkbox" name="alert_major" ${w.alert_major ? "checked" : ""}>${t(" New major version")}</label>
+    <label class="check"><input type="checkbox" name="alert_security" ${w.alert_security ? "checked" : ""}>${t(" New version with a security fix")}</label>
+    ${field(t("Outdated for more than (days)"), inp("alert_overdue_days", w.alert_overdue_days, `type="number" min="1" placeholder="${t("no alert")}"`))}
   </div>`;
   modal(isNew ? t("New webhook") : t("Edit {name}", { name: w.name }), body, {
     onSubmit: async (form) => {
