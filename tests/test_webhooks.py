@@ -39,3 +39,11 @@ def test_discord_payloads_split_under_limit():
         for i in range(25)]}
     payloads = build_payloads("discord", data, "")
     assert len(payloads) > 1 and all(0 < len(p["content"]) <= 2000 for p in payloads)
+
+
+def test_google_chat_and_generic_payloads():
+    data = _data() | {"new_releases": [{"project": "app", "tag": "v2.0.0", "url": "https://x/v2", "level": "major"}]}
+    [chat] = build_payloads("google_chat", data, "md")
+    assert "*📦" in chat["text"] and "<https://x/v2|v2.0.0>" in chat["text"]  # Slack-style markup
+    [generic] = build_payloads("generic", data, "md")
+    assert generic == {"event": "changelog_watcher.report", "markdown": "md", "report": data}

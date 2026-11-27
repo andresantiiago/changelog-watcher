@@ -1,9 +1,12 @@
+import re
+
 import httpx
+import pytest
 import respx
 
 from changelog_watcher.config import Settings
 from changelog_watcher.models import Project
-from changelog_watcher.sources import fetch_releases
+from changelog_watcher.sources import SourceError, fetch_releases
 from changelog_watcher.sources.changelog import parse_changelog
 
 CHANGELOG = """# Changelog
@@ -173,3 +176,53 @@ def test_webpage_with_tag_pattern_enriched_from_changelog():
     rels = asyncio.run(_run(p))
     assert "feature X" in rels[0].notes
     assert rels[0].published_at.date().isoformat() == "2024-05-01"
+
+
+@respx.mock
+def test_gitlab_releases_and_tags_token_only_to_configured_gitlab():
+    import asyncio
+
+    rel = respx.get("https://gitlab.com/api/v4/projects/grp%2Fapp/releases").mock(return_value=httpx.Response(200, json=[
+        {"tag_name": "v2.0.0", "name": "2.0", "description": "notes", "released_at": "2024-03-01T00:00:00Z",
+         "_links": {"self": "https://gitlab.com/grp/app/-/releases/v2.0.0"}},
+        {"tag_name": "v2.1.0", "upcoming_release": True, "created_at": "2024-04-01"},
+    ]))
+    tags = respx.get("https://git.corp/api/v4/projects/grp%2Fapp/repository/tags").mock(
+        return_value=httpx.Response(200, json=[{"name": "1.0.0", "message": "m", "commit": {"created_at": "2024-01-01"}}]))
+
+    async def run(project):
+        async with httpx.AsyncClient() as c:
+            return await fetch_releases(project, c, Settings(max_release_pages=1, gitlab_token="tok"))
+
+    rels = asyncio.run(run(_project(source_type="gitlab_releases", repository="https://gitlab.com/grp/app.git")))
+    assert [(r.tag, r.prerelease) for r in rels] == [("v2.0.0", False), ("v2.1.0", True)]
+    assert rels[0].url.endswith("/releases/v2.0.0") and rels[1].published_at.year == 2024
+    assert rel.calls.last.request.headers["PRIVATE-TOKEN"] == "tok"
+
+    rels = asyncio.run(run(_project(source_type="gitlab_tags", repository="grp/app", source_url="https://git.corp")))
+    assert [r.tag for r in rels] == ["1.0.0"] and rels[0].url == "https://git.corp/grp/app/-/tags/1.0.0"
+    assert "PRIVATE-TOKEN" not in tags.calls.last.request.headers  # token never leaves GITLAB_URL
+
+
+@pytest.mark.parametrize("response,error", [
+    (httpx.Response(404), "not found"),
+    (httpx.Response(403, headers={"x-ratelimit-remaining": "0"}), "rate limit"),
+    (httpx.Response(401), "access denied (401)"),
+    (httpx.Response(500), "500"),
+    (httpx.TimeoutException("timed out"), "timed out"),
+])
+@respx.mock
+def test_source_http_failures_raise(response, error):
+    import asyncio
+
+    respx.get("https://api.github.com/repos/org/repo/releases").mock(side_effect=[response])
+    with pytest.raises((SourceError, httpx.HTTPError), match=re.escape(error)):
+        asyncio.run(_run(_project()))
+
+
+@respx.mock
+def test_source_empty_response():
+    import asyncio
+
+    respx.get("https://api.github.com/repos/org/repo/releases").mock(return_value=httpx.Response(200, json=[]))
+    assert asyncio.run(_run(_project())) == []

@@ -118,7 +118,7 @@ def _parse(text: str | None, pattern: str | None) -> Version | None:
     pre = m.group("pre")
     pre_word = None
     if pre:
-        pre_word = re.match(r"[a-zA-Z]+", pre).group(0).lower()
+        pre_word = re.sub(r"[^a-zA-Z].*", "", pre).lower()  # pre starts with a keyword
     return Version(
         major=int(m.group("major")),
         minor=int(m.group("minor")),

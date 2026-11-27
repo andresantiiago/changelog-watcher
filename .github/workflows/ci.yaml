@@ -67,6 +67,9 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]" pip-audit
       - run: ruff check --output-format=github .
+      - run: ruff format --check .
+      - name: Tipos (mypy, módulos em pyproject.toml)
+        run: mypy
       - name: Vulnerabilidades nas dependências
         run: pip-audit --skip-editable
 
@@ -76,6 +79,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build da imagem (sem publicar)
         run: docker build -t changelog-watcher:ci .
+      - name: Vulnerabilidades na imagem (Trivy, HIGH/CRITICAL com correção disponível)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 \
+            image --quiet --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL changelog-watcher:ci
 
   helm:
     runs-on: ubuntu-latest
@@ -89,3 +96,55 @@ jobs:
           helm template ci deploy/helm/changelog-watcher | grep -q "^kind: StatefulSet"
           helm template ci deploy/helm/changelog-watcher -f deploy/helm/values-kind.yaml | grep -q "^kind: Deployment"
           ! helm template ci deploy/helm/changelog-watcher --set persistence.type=postgres > /dev/null 2>&1
+      - name: Manifests válidos (kubeconform, CRDs pelo datreeio/CRDs-catalog)
+        run: |
+          set -o pipefail
+          C=deploy/helm/changelog-watcher
+          kc() {
+            docker run --rm -i ghcr.io/yannh/kubeconform:v0.8.0 -strict -summary -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          }
+          helm template ci $C | kc
+          helm template ci $C -f deploy/helm/values-kind.yaml | kc
+          helm template ci $C --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true \
+            --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true \
+            --set networkPolicy.prometheus.enabled=true --set networkPolicy.internet.enabled=true | kc
+          OUT=$(helm template ci $C --set persistence.existingClaim=data --set auth.existingSecret=cw-auth \
+            --set ingress.enabled=true --set 'ingress.tls[0].secretName=cw-tls' --set 'ingress.tls[0].hosts[0]=cw.example.com')
+          echo "$OUT" | kc
+          echo "$OUT" | grep -q 'claimName: data'
+          echo "$OUT" | grep -q 'name: cw-auth, key: AUTH_PASSWORD'
+          echo "$OUT" | grep -q 'secretName: cw-tls'
+
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1.15.2
+        with:
+          cluster_name: ci
+      - name: Imagem local carregada no kind
+        run: |
+          docker build -t changelog-watcher:local .
+          kind load docker-image changelog-watcher:local --name ci
+      - name: Instala o chart com values-kind.yaml
+        # sem ingress (o kind do CI não tem Traefik) e sem refresh na subida (não depende de rede externa)
+        run: |
+          helm install changelog-watcher deploy/helm/changelog-watcher -n cw --create-namespace \
+            -f deploy/helm/values-kind.yaml --set ingress.enabled=false --set config.refreshOnStartup=false \
+            --wait --timeout 5m
+      - name: API responde com auth e o seed foi carregado
+        run: |
+          PASS=$(kubectl -n cw get secret changelog-watcher-secrets -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d)
+          kubectl -n cw port-forward svc/changelog-watcher 8080:80 &
+          for _ in $(seq 30); do curl -sf http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -sf http://127.0.0.1:8080/readyz
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/environments)" = 401
+          curl -sf -u "admin:$PASS" http://127.0.0.1:8080/api/environments | grep -q '"name":"kind-lab"'
+      - name: Diagnóstico
+        if: failure()
+        run: |
+          kubectl -n cw get all
+          kubectl -n cw describe pods
+          kubectl -n cw logs -l app.kubernetes.io/instance=changelog-watcher --tail=200
