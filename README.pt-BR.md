@@ -28,7 +28,8 @@ que está rodando em cada ambiente e avisa o que precisa ser atualizado.
 - **Fim de suporte (EOL)** do ciclo em uso, consultado no [endoflife.date](https://endoflife.date),
   com aviso quando falta pouco (90 dias por padrão).
 - **Relatório semanal** enviado por webhook (Slack, Microsoft Teams, Discord,
-  Google Chat ou JSON genérico).
+  Google Chat ou JSON genérico), e **alertas imediatos** para nova major, correção de
+  segurança ou atraso longo.
 - **Métricas Prometheus** em `/metrics`, **dashboard do Grafana** e **chart Helm**
   inclusos.
 - Interface, relatórios e webhooks em **inglês** (padrão) ou **português** (ver [Idioma](#idioma)).
@@ -493,6 +494,24 @@ implantado), aplicações desatualizadas com bugfix/minor/major disponíveis,
 fim de suporte (EOL), aplicações sem versão identificada e diferenças entre ambientes. Relatórios
 ficam salvos e podem ser baixados em Markdown.
 
+### Alertas imediatos
+
+Além do relatório semanal, cada webhook pode ativar alertas verificados ao fim de cada
+atualização (todos desligados por padrão):
+
+| Campo | Alerta quando |
+|---|---|
+| `alert_major` | existe uma nova versão major para o que está implantado |
+| `alert_security` | uma versão mais nova que a implantada menciona `security`, `CVE-…` ou `vulnerab…` no título ou nas notas |
+| `alert_overdue_days` | a aplicação está desatualizada (bugfix/minor/major, fora da tolerância) há mais de N dias |
+
+Cada alerta é enviado uma vez por webhook, implantação (aplicação × ambiente) e versão: uma nova
+major ou uma versão mais recente alerta de novo. Os alertas de uma mesma atualização vão numa
+única mensagem; uma entrega com falha é repetida na atualização seguinte. O tipo `generic` recebe
+`{"event": "changelog_watcher.alert", "markdown": …, "alerts": [{"rule", "project", "environment",
+"current_version", "version", "url", …}]}`. A regra de segurança procura palavras-chave nas notas
+da versão, então depende de o projeto escrevê-las.
+
 ## Métricas
 
 Todas com prefixo `changelog_watcher_`, calculadas a partir do banco a cada scrape:
@@ -552,11 +571,12 @@ changelog_watcher/
   prometheus.py detecção da versão em uso via kube_pod_container_info
   versioning.py parsing de versões e classificação bugfix/minor/major
   analysis.py   status por implantação, resumos, comparação entre ambientes
-  refresh.py    pipeline: detecção → releases → EOL → snapshot diário
+  refresh.py    pipeline: detecção → releases → EOL → snapshot diário → alertas
   eol.py        fim de suporte via endoflife.date
   report.py     relatório (dados + Markdown)
   i18n.py       idioma (inglês/português) e catálogo de mensagens do backend
   webhooks.py   formatos Slack/Teams/Discord/Google Chat/genérico
+  alerts.py     alertas imediatos após cada atualização (major, segurança, atraso)
   metrics.py    collector Prometheus
   api.py        API REST (FastAPI)
   static/       frontend (HTML/JS/CSS, sem build; textos em i18n.js)

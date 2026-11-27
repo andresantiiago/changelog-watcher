@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from . import prometheus as prom
 from . import safehttp
+from .alerts import send_alerts
 from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
@@ -222,6 +223,14 @@ async def run_refresh(project_ids: list[int] | None = None, detect: bool = True)
                         log.exception("EOL refresh failed")
                         STATE.errors.append(f"EOL: {exc}")
             store_snapshots()
+            try:
+                with session_scope() as s:
+                    for r in await send_alerts(s):
+                        if not r["ok"]:
+                            STATE.errors.append(_("alerts to {webhook}: {detail}", webhook=r["webhook"], detail=r["detail"]))
+            except Exception as exc:  # alerts are best effort: never fail the refresh
+                log.exception("alerts failed")
+                STATE.errors.append(_("alerts: {error}", error=exc))
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
             log.info("refresh finished: %s project(s) ok, %s failed, %s new versions", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
             REFRESH_TOTAL.labels("ok" if STATE.success else "partial").inc()

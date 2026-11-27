@@ -105,13 +105,23 @@ def to_slack(text: str) -> str:
 
 
 def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
+    if kind in CHAT_KINDS:
+        return chat_payloads(kind, chat_lines(data))
+    return [{"event": "changelog_watcher.report", "markdown": markdown, "report": data}]
+
+
+CHAT_KINDS = ("slack", "google_chat", "discord", "teams")
+
+
+def chat_payloads(kind: str, lines: list[str]) -> list[dict]:
+    """Chat message(s) for ``kind`` from markdown lines; the first line is the title."""
     if kind == "slack":
-        return [{"text": to_slack("\n".join(chat_lines(data))), "mrkdwn": True}]
+        return [{"text": to_slack("\n".join(lines)), "mrkdwn": True}]
     if kind == "google_chat":
-        return [{"text": to_slack("\n".join(chat_lines(data)))}]
+        return [{"text": to_slack("\n".join(lines))}]
     if kind == "discord":
         chunks, current = [], ""
-        for line in chat_lines(data):
+        for line in lines:
             if len(current) + len(line) + 1 > 1900:
                 chunks.append(current)
                 current = ""
@@ -122,7 +132,7 @@ def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
     if kind == "teams":
         body = [{"type": "TextBlock", "text": line or " ", "wrap": True,
                  **({"weight": "Bolder", "size": "Medium"} if i == 0 else {})}
-                for i, line in enumerate(chat_lines(data))]
+                for i, line in enumerate(lines)]
         return [{
             "type": "message",
             "attachments": [{
@@ -136,7 +146,7 @@ def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
                 },
             }],
         }]
-    return [{"event": "changelog_watcher.report", "markdown": markdown, "report": data}]
+    raise ValueError(kind)
 
 
 async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: httpx.AsyncClient) -> dict:
@@ -150,15 +160,18 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
 
     if webhook.environment_ids:
         markdown = render_markdown(data)
-    payloads = build_payloads(webhook.kind, data, markdown)
+    return await post_payloads(webhook.name, url, build_payloads(webhook.kind, data, markdown), client)
+
+
+async def post_payloads(name: str, url: str, payloads: list[dict], client: httpx.AsyncClient) -> dict:
     try:
         for payload in payloads:
             resp = await client.post(url, json=payload)
             if resp.status_code >= 300:
-                return {"webhook": webhook.name, "ok": False, "detail": f"HTTP {resp.status_code}"}  # no body: SSRF read
-        return {"webhook": webhook.name, "ok": True, "detail": _("{n} message(s) sent", n=len(payloads))}
+                return {"webhook": name, "ok": False, "detail": f"HTTP {resp.status_code}"}  # no body: SSRF read
+        return {"webhook": name, "ok": True, "detail": _("{n} message(s) sent", n=len(payloads))}
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
-        return {"webhook": webhook.name, "ok": False, "detail": str(exc)}
+        return {"webhook": name, "ok": False, "detail": str(exc)}
 
 
 def record_status(webhook: Webhook, result: dict, suffix: str = "") -> None:

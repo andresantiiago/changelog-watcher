@@ -28,7 +28,7 @@ running in each environment and tells you what needs updating.
 - **End of life (EOL)** of the cycle in use, looked up on [endoflife.date](https://endoflife.date),
   with a warning when it gets close (90 days by default).
 - **Weekly report** sent by webhook (Slack, Microsoft Teams, Discord, Google Chat or
-  generic JSON).
+  generic JSON), plus **immediate alerts** for a new major, a security fix or a long delay.
 - **Prometheus metrics** on `/metrics`, a **Grafana dashboard** and a **Helm chart**
   included.
 - Interface, reports and webhooks in **English** (default) or **Portuguese** (see
@@ -501,6 +501,24 @@ their impact on what is deployed), outdated applications with the available
 bugfix/minor/major, the end of life (EOL) section, applications without an identified version
 and differences between environments. Reports are saved and can be downloaded as Markdown.
 
+### Immediate alerts
+
+Besides the weekly report, each webhook can turn on alerts checked at the end of every refresh
+(all off by default):
+
+| Field | Alert when |
+|---|---|
+| `alert_major` | a new major version exists for what is deployed |
+| `alert_security` | a version newer than the deployed one mentions `security`, `CVE-…` or `vulnerab…` in its title or notes |
+| `alert_overdue_days` | the application is outdated (bugfix/minor/major, not within tolerance) for more than N days |
+
+Each alert is sent once per webhook, deployment (application × environment) and version: a new
+major or a newer latest version alerts again. Alerts found in the same refresh go in a single
+message; a failed delivery is retried on the next refresh. The `generic` kind receives
+`{"event": "changelog_watcher.alert", "markdown": …, "alerts": [{"rule", "project", "environment",
+"current_version", "version", "url", …}]}`. The security rule is a keyword match on the release
+notes, so it depends on the project writing them.
+
 ## Metrics
 
 All prefixed with `changelog_watcher_`, computed from the database on each scrape:
@@ -560,11 +578,12 @@ changelog_watcher/
   prometheus.py detection of the version in use via kube_pod_container_info
   versioning.py version parsing and bugfix/minor/major classification
   analysis.py   status per deployment, summaries, environment comparison
-  refresh.py    pipeline: detection → releases → EOL → daily snapshot
+  refresh.py    pipeline: detection → releases → EOL → daily snapshot → alerts
   eol.py        end of life from endoflife.date
   report.py     report (data + Markdown)
   i18n.py       language (English/Portuguese) and backend message catalog
   webhooks.py   Slack/Teams/Discord/Google Chat/generic formats
+  alerts.py     immediate alerts after each refresh (major, security, delay)
   metrics.py    Prometheus collector
   api.py        REST API (FastAPI)
   static/       frontend (HTML/JS/CSS, no build step; texts in i18n.js)

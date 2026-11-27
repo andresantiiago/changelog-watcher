@@ -138,6 +138,9 @@ class WebhookIn(BaseModel):
     enabled: bool = True
     only_outdated: bool = False
     environment_ids: list[int] = Field(default_factory=list)
+    alert_major: bool = False
+    alert_security: bool = False
+    alert_overdue_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class WebhookOut(WebhookIn):

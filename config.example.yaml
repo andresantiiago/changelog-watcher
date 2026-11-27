@@ -93,3 +93,6 @@ webhooks:
     url: ${TEAMS_WEBHOOK_URL}
     environments: [production]              # only these environments
     only_outdated: true                   # does not send when everything is up to date
+    alert_major: true                     # immediate alert for a new major (once per version)
+    alert_security: true                  # ... for a newer release mentioning a security fix
+    alert_overdue_days: 90                # ... when outdated for more than 90 days

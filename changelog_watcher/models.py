@@ -193,9 +193,30 @@ class Webhook(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     only_outdated: Mapped[bool] = mapped_column(Boolean, default=False)
     environment_ids: Mapped[list] = mapped_column(JSON, default=list)  # empty = all
+    # Immediate alerts after each refresh (alerts.py), all off by default.
+    alert_major: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_security: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_overdue_days: Mapped[int | None] = mapped_column(Integer, default=None)
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_status: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AlertSent(Base):
+    """An alert already delivered: each rule fires once per webhook, deployment and version."""
+
+    __tablename__ = "alerts_sent"
+    __table_args__ = (
+        UniqueConstraint("webhook_id", "project_id", "environment_id", "rule", "version", name="uq_alert_sent"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    webhook_id: Mapped[int] = mapped_column(ForeignKey("webhooks.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    environment_id: Mapped[int] = mapped_column(ForeignKey("environments.id", ondelete="CASCADE"))
+    rule: Mapped[str] = mapped_column(String(20))  # major|security|overdue
+    version: Mapped[str] = mapped_column(String(100))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Report(Base):

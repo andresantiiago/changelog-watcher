@@ -160,6 +160,9 @@ seed:
   #  - name: slack-platform
   #    kind: slack
   #    url: ${SLACK_WEBHOOK_URL}
+  #    alert_major: true            # immediate alerts after each refresh (off by default)
+  #    alert_security: true
+  #    alert_overdue_days: 90
 
 metrics:
   # Bearer token required on /metrics (stored in the Secret as METRICS_TOKEN; the
