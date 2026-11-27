@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import Collector
@@ -49,7 +49,7 @@ class WatcherCollector(Collector):
     def _build(self):
         from .refresh import STATE
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with session_scope() as s:
             envs = load_environments(s)
             statuses = compute_statuses(s, now=now)

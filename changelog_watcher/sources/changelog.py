@@ -48,7 +48,7 @@ def parse_changelog(text: str, tag_pattern: str | None = None) -> list[ReleaseDa
             current[2].append(line)
 
     out: list[ReleaseData] = []
-    for title, _, lines in sections:
+    for title, _level, lines in sections:
         clean = _strip_links(title)
         version = parse_version(clean, tag_pattern)
         if not version:

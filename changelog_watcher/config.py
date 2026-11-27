@@ -60,7 +60,7 @@ class Settings:
     tolerance_bugfixes: int | None = 3
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         e = os.environ.get  # empty counts as unset: Helm renders a null value as ""
         return cls(
             database_url=e("DATABASE_URL", cls.database_url),

@@ -20,13 +20,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.15"
+          cache: pip
       - run: pip install -e ".[dev]"
       - name: Testes
-        run: pytest -v -rfE --junitxml=pytest.xml
+        # Cobertura mínima em pyproject.toml ([tool.coverage.report] fail_under).
+        run: pytest -v -rfE --junitxml=pytest.xml --cov --cov-report=
       - name: Resumo dos testes
         if: always()
         run: |
           python3 .github/scripts/test_summary.py pytest.xml > summary.md
+          if [ -f .coverage ]; then
+            { echo; echo "<details><summary>Cobertura: $(coverage report --format=total)%</summary>"; echo
+              coverage report --format=markdown --fail-under=0; echo; echo "</details>"; } >> summary.md
+          fi
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Comentário no PR
         if: always() && github.event_name == 'pull_request'
@@ -50,6 +56,26 @@ jobs:
         run: |
           python deploy/grafana/build_dashboard.py
           git diff --exit-code deploy/
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+          cache: pip
+      - run: pip install -e ".[dev]" pip-audit
+      - run: ruff check --output-format=github .
+      - name: Vulnerabilidades nas dependências
+        run: pip-audit --skip-editable
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build da imagem (sem publicar)
+        run: docker build -t changelog-watcher:ci .
 
   helm:
     runs-on: ubuntu-latest

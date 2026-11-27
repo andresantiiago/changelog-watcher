@@ -19,9 +19,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from .i18n import _
 from . import safehttp
 from .config import expand_env
+from .i18n import _
 from .suggest import chart_name as _chart_name
 from .versioning import ghcr_repository, image_repository, image_tag, parse_version
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
@@ -20,12 +20,12 @@ from .db import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def aware(dt: datetime | None) -> datetime | None:
     """Naive datetimes (SQLite, date-only strings) are UTC."""
-    return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 class Environment(Base):
@@ -47,7 +47,7 @@ class Environment(Base):
     prometheus_extra_selector: Mapped[str | None] = mapped_column(String(500), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    deployments: Mapped[list["Deployment"]] = relationship(
+    deployments: Mapped[list[Deployment]] = relationship(
         back_populates="environment", cascade="all, delete-orphan"
     )
 
@@ -97,10 +97,10 @@ class Project(Base):
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    releases: Mapped[list["Release"]] = relationship(
+    releases: Mapped[list[Release]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
-    deployments: Mapped[list["Deployment"]] = relationship(
+    deployments: Mapped[list[Deployment]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 

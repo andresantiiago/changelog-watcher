@@ -5,12 +5,13 @@ from datetime import timedelta
 from itertools import islice
 
 import httpx
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from .i18n import _
 from . import eol, i18n, logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
@@ -32,6 +33,7 @@ from .analysis import (
 )
 from .config import SECRET_MASK, get_settings, mask_secret
 from .db import get_db
+from .i18n import _
 from .models import (
     SNAPSHOT_FIELDS,
     AppSetting,
@@ -46,9 +48,6 @@ from .models import (
 )
 from .refresh import STATE, run_refresh
 from .report import create_report
-from apscheduler.triggers.cron import CronTrigger
-from pydantic import BaseModel, Field
-
 from .scheduler import effective_schedule, next_runs, reschedule
 from .schemas import (
     DETECTION_MODES,

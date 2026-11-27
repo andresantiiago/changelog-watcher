@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from prometheus_client import Counter, Histogram
@@ -158,7 +158,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
 
 
 def store_snapshots() -> None:
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     with session_scope() as s:
         statuses = compute_statuses(s)
         for env in load_environments(s):

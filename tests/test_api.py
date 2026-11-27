@@ -28,7 +28,7 @@ def test_dashboard(client, seeded):
     assert prod["counts"]["major"] == 1
     assert prod["patch_pending"] == 1
     assert prod["up_to_date_ratio"] == round(2 / 3, 4)
-    statuses = client.get("/api/status?environment_id=%d" % prod["environment_id"]).json()
+    statuses = client.get(f"/api/status?environment_id={prod['environment_id']}").json()
     ages = [s["libyears"] for s in statuses if s["libyears"] is not None]
     assert prod["libyears_avg"] == round(sum(ages) / len(ages), 3)
     assert prod["libyears_avg"] < prod["libyears"] or len(ages) == 1
@@ -302,6 +302,6 @@ def test_basic_auth_non_ascii(monkeypatch):
     assert c.get("/api/refresh/status").status_code == 401
     assert c.get("/healthz").status_code == 200
     assert c.get("/api/refresh/status", headers=basic("admin:sénha".encode())).status_code == 200
-    assert c.get("/api/refresh/status", headers=basic("admin:senha".encode())).status_code == 401
+    assert c.get("/api/refresh/status", headers=basic(b"admin:senha")).status_code == 401
     assert c.get("/api/refresh/status", headers=basic("ádmin:x".encode())).status_code == 401
     assert c.get("/api/refresh/status", headers={"Authorization": "Basic !!!"}).status_code == 401

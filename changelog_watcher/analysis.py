@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from itertools import combinations
 
 from sqlalchemy import select
@@ -169,7 +169,7 @@ def deployment_status(
     now: datetime | None = None,
     tolerance: dict[str, int | None] | None = None,
 ) -> DeploymentStatus:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     current_raw = deployment.current_version
     current = pv(project, current_raw)
     info = classify(current, versions.keys())
@@ -421,7 +421,7 @@ def release_dict(rel: Release, version: Version | None = None) -> dict:
 
 
 def recent_releases(session: Session, days: int = 7, now: datetime | None = None) -> list[dict]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     since = now - timedelta(days=days)
     out = []
     for project in load_projects(session):

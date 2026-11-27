@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import traceback
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ponytail: só em memória, perdido ao reiniciar (o histórico fica nos logs do pod);
 # persistir se a UI precisar de linhas mais antigas.
@@ -16,7 +16,7 @@ class MemoryLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             RECORDS.append({
-                "created_at": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+                "created_at": datetime.fromtimestamp(record.created, UTC).isoformat(),
                 "level": record.levelname,
                 "logger": record.name,
                 "message": record.getMessage()[:4000],

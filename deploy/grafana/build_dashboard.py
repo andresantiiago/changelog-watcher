@@ -137,7 +137,8 @@ def build() -> dict:
     y = 0
 
     # ------------------------------------------------------------- overview
-    panels.append(row("Visão geral", y)); y += 1
+    panels.append(row("Visão geral", y))
+    y += 1
     panels.append(stat(
         "% atualizado", f"changelog_watcher_environment_up_to_date_ratio{{{ENV}}}", 0, y, w=6, h=5,
         unit="percentunit", legend="{{environment}}", decimals=0,
@@ -196,7 +197,8 @@ def build() -> dict:
     y += 8
 
     # ----------------------------------------------------------- aging trend
-    panels.append(row("Envelhecimento do ambiente", y)); y += 1
+    panels.append(row("Envelhecimento do ambiente", y))
+    y += 1
     panels.append(timeseries("% atualizado ao longo do tempo",
                              [target(f"changelog_watcher_environment_up_to_date_ratio{{{ENV}}}", "{{environment}}")],
                              0, y, unit="percentunit", max_=1))
@@ -217,7 +219,8 @@ def build() -> dict:
     y += 8
 
     # ------------------------------------------------------------- versions
-    panels.append(row("Versões por aplicação", y)); y += 1
+    panels.append(row("Versões por aplicação", y))
+    y += 1
     versions_table = {
         "id": nid(), "type": "table", "title": "Versões em uso e atualizações disponíveis", "datasource": DS,
         "gridPos": {"x": 0, "y": y, "w": 24, "h": 12},
@@ -313,7 +316,8 @@ def build() -> dict:
     y += 10
 
     # ------------------------------------------------------------ end of life
-    panels.append(row("Fim de suporte (EOL)", y)); y += 1
+    panels.append(row("Fim de suporte (EOL)", y))
+    y += 1
     panels.append(stat("EOL atingido", f'sum(changelog_watcher_environment_apps_eol{{{ENV}, status="eol"}})',
                        0, y, w=4, h=4, steps=[(None, "text"), (1, STATUS_COLORS["major"])],
                        description="Implantações cujo ciclo em uso já está sem suporte (endoflife.date)."))
@@ -359,7 +363,8 @@ def build() -> dict:
     y += 8
 
     # -------------------------------------------------------- releases/health
-    panels.append(row("Novas versões e saúde da coleta", y)); y += 1
+    panels.append(row("Novas versões e saúde da coleta", y))
+    y += 1
     releases = {
         "id": nid(), "type": "table", "title": "Versões publicadas nos últimos 7 dias", "datasource": DS,
         "gridPos": {"x": 0, "y": y, "w": 12, "h": 9},

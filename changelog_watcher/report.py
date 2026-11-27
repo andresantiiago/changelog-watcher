@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
                       now: datetime | None = None) -> dict:
     settings = get_settings()
     days = days or settings.report_days
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     start = now - timedelta(days=days)
     environments = [e for e in load_environments(session) if not environment_ids or e.id in environment_ids]
     statuses = compute_statuses(session, [e.id for e in environments], now=now)

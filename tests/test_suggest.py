@@ -143,6 +143,7 @@ def test_suggest_source_internal_mirror_label(client):
 
 def test_public_refs_keeps_original_registry_in_path():
     import asyncio
+
     from changelog_watcher.suggest import _public_refs
     assert asyncio.run(_public_refs(None, "harbor.corp/proxy/quay.io/prometheus/prometheus:v3.1.0")) == [
         "quay.io/prometheus/prometheus:v3.1.0"]

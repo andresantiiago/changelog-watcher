@@ -18,7 +18,7 @@ import json
 import os
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 db_path, discover_path = sys.argv[1], sys.argv[2]
@@ -40,7 +40,7 @@ from changelog_watcher.models import AppSetting, Deployment, Environment, Projec
 from changelog_watcher.refresh import store_snapshots  # noqa: E402
 from changelog_watcher.report import create_report  # noqa: E402
 
-NOW = datetime.now(timezone.utc).replace(microsecond=0)
+NOW = datetime.now(UTC).replace(microsecond=0)
 ENVS = ["desenvolvimento", "homologacao", "producao"]
 # Data is written in pt-BR below; with LANG=en these names are shown instead.
 EN_NAMES = {

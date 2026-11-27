@@ -242,6 +242,8 @@ API limit), fewer suggestions show up, and the failure goes to the logs (WARNING
 
 ### Locally
 
+Requires Python 3.15+.
+
 ```bash
 pip install -e ".[dev]"
 ```
@@ -591,6 +593,8 @@ from Prometheus itself.
 
 ```bash
 pytest -q
+pytest -q --cov    # tests with coverage (minimum in pyproject.toml)
+ruff check .
 ```
 
 ```bash

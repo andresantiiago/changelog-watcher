@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
@@ -8,11 +8,11 @@ os.environ.setdefault("METRICS_CACHE_SECONDS", "0")
 os.environ.setdefault("AUTH_DISABLED", "true")
 os.environ.setdefault("EOL_ENABLED", "false")  # no calls to endoflife.date from refresh tests
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from changelog_watcher import db as dbmod  # noqa: E402
-from changelog_watcher.db import Base  # noqa: E402
+from changelog_watcher import db as dbmod
+from changelog_watcher.db import Base
 
 
 @pytest.fixture()
@@ -25,7 +25,7 @@ def client():
     Base.metadata.drop_all(engine)
 
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 def days_ago(n: float) -> datetime:

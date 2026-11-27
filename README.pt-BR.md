@@ -240,6 +240,8 @@ limite da API), só aparecem menos sugestões, e a falha fica nos logs (WARNING)
 
 ### Local
 
+Requer Python 3.15+.
+
 ```bash
 pip install -e ".[dev]"
 ```
@@ -584,6 +586,8 @@ Grafana o histórico vem do próprio Prometheus.
 
 ```bash
 pytest -q
+pytest -q --cov    # testes com cobertura (mínimo no pyproject.toml)
+ruff check .
 ```
 
 ```bash
