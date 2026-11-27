@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 import httpx
 
+from ..i18n import _
 from .base import ReleaseData, SourceError, paged, parse_datetime
 
 
@@ -17,7 +18,7 @@ def _path(project) -> str:
         path = path.split("://", 1)[1].split("/", 1)[1]
     path = path.removesuffix(".git").strip("/")
     if "/" not in path:
-        raise SourceError(f"projeto GitLab inválido: '{project.repository}' (use grupo/projeto)")
+        raise SourceError(_("invalid GitLab project: '{repo}' (use group/project)", repo=project.repository))
     return path
 
 

@@ -6,15 +6,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .eol import _SLUG as EOL_SLUG
+from .i18n import _
 from .sources import SOURCE_TYPES
 from .webhooks import WEBHOOK_KINDS
 
 DETECTION_MODES = {
-    "none": "Sem detecção (versão manual)",
+    "none": "No detection (manual version)",
     "workload": "Workload (Deployment/StatefulSet/DaemonSet)",
-    "helm": "Release Helm (todos os workloads do release)",
-    "image": "Padrão de imagem",
-    "query": "Consulta PromQL personalizada",
+    "helm": "Helm release (all workloads of the release)",
+    "image": "Image pattern",
+    "query": "Custom PromQL query",
 }
 
 SourceType = Literal[tuple(SOURCE_TYPES)]  # type: ignore[valid-type]
@@ -24,12 +26,14 @@ VersionSource = Literal["manual", "prometheus"]
 WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
 
 
+
+
 def _check_regex(value: str | None) -> str | None:
     if value:
         try:
             re.compile(value)
         except re.error as exc:
-            raise ValueError(f"regex inválida: {exc}") from exc
+            raise ValueError(_("invalid regex: {error}", error=exc)) from exc
     return value or None
 
 
@@ -94,11 +98,25 @@ class ProjectIn(BaseModel):
     image_pattern: str | None = None
     promql_query: str | None = None
     image_version_pattern: str | None = None
+    # endoflife.date product (e.g. "postgresql"); empty = automatic match, "none" = no EOL check.
+    eol_product: str | None = Field(default=None, max_length=100)
+    # Outdated tolerance; None = the global value.
+    tolerance_days: int | None = Field(default=None, ge=0)
+    tolerance_minors: int | None = Field(default=None, ge=0)
+    tolerance_bugfixes: int | None = Field(default=None, ge=0)
     # environment_id -> deployment settings. Missing environments are removed
     # when ``deployments`` is sent; ``None`` leaves deployments untouched.
     deployments: dict[int, DeploymentIn] | None = None
 
     _tag = field_validator("tag_pattern", "image_version_pattern")(_check_regex)
+
+    @field_validator("eol_product")
+    @classmethod
+    def _eol_product(cls, value: str | None) -> str | None:
+        value = (value or "").strip().lower()
+        if value and not EOL_SLUG.fullmatch(value):
+            raise ValueError(_("invalid product: use the endoflife.date identifier, e.g. postgresql"))
+        return value or None
 
 
 class ProjectOut(ProjectIn):
@@ -107,6 +125,8 @@ class ProjectOut(ProjectIn):
     repository: str  # no min_length: seeded projects may lack one
     last_checked_at: datetime | None = None
     last_error: str | None = None
+    eol_data: dict | None = None
+    eol_error: str | None = None
     release_count: int = 0
     deployments: list[DeploymentOut] = Field(default_factory=list)
 

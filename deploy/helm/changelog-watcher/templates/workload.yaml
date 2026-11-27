@@ -3,8 +3,8 @@
 {{- fail (printf "persistence.type deve ser \"pvc\" ou \"inMemory\" (recebido: %q)" $type) }}
 {{- end }}
 {{- $pvc := eq $type "pvc" -}}
-{{- /* pvc: StatefulSet com o SQLite no volume (dados mantidos); inMemory: Deployment sem volume (dados perdidos ao reiniciar).
-       Sempre 1 réplica: banco SQLite e agendador rodam dentro do processo. */ -}}
+{{- /* pvc: StatefulSet with SQLite on the volume (data kept); inMemory: Deployment without a volume (data lost on restart).
+       Always 1 replica: the SQLite database and the scheduler run inside the process. */ -}}
 apiVersion: apps/v1
 kind: {{ ternary "StatefulSet" "Deployment" $pvc }}
 metadata:
@@ -13,12 +13,12 @@ metadata:
 spec:
   replicas: 1
   {{- if $pvc }}
-  # Service comum (não headless): com 1 réplica o DNS por pod não é usado.
+  # Regular (non-headless) Service: with 1 replica per-pod DNS is not used.
   serviceName: {{ include "cw.fullname" . }}
-  # RollingUpdate num StatefulSet de 1 réplica apaga o pod antigo antes de criar o novo
-  # (como o Recreate do Deployment), então o PVC RWO e o SQLite nunca têm dois donos.
-  # Parallel: não trava o rollout esperando um pod quebrado ficar Ready (com OrderedReady,
-  # voltar a versão após um pod em CrashLoop/ImagePull exigiria apagar o pod na mão).
+  # RollingUpdate on a 1-replica StatefulSet deletes the old pod before creating the new one
+  # (like a Deployment's Recreate), so the RWO PVC and SQLite never have two owners.
+  # Parallel: the rollout does not hang waiting for a broken pod to become Ready (with
+  # OrderedReady, rolling back after a CrashLoop/ImagePull pod would require deleting it by hand).
   podManagementPolicy: Parallel
   updateStrategy:
     type: RollingUpdate
@@ -53,6 +53,8 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: APP_LANGUAGE
+              value: {{ .Values.config.language | default "en" | quote }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
             - name: PUBLIC_URL
@@ -71,6 +73,20 @@ spec:
               value: {{ .Values.config.maxReleasePages | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
+            - name: EOL_ENABLED
+              value: {{ .Values.config.eol.enabled | quote }}
+            - name: EOL_API_URL
+              value: {{ .Values.config.eol.apiUrl | quote }}
+            - name: EOL_WARNING_DAYS
+              value: {{ .Values.config.eol.warningDays | quote }}
+            - name: EOL_AUTO_MATCH
+              value: {{ .Values.config.eol.autoMatch | quote }}
+            - name: TOLERANCE_DAYS
+              value: {{ .Values.config.tolerance.days | quote }}
+            - name: TOLERANCE_MINORS
+              value: {{ .Values.config.tolerance.minors | quote }}
+            - name: TOLERANCE_BUGFIXES
+              value: {{ .Values.config.tolerance.bugfixes | quote }}
             - name: SEED_OVERWRITE
               value: {{ .Values.config.seedOverwrite | quote }}
             {{- if include "cw.hasSeed" . }}

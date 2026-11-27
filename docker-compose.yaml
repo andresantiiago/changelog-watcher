@@ -1,4 +1,4 @@
-# Execução local: docker compose up --build  →  http://localhost:8080
+# Local run: docker compose up --build  →  http://localhost:8080
 services:
   changelog-watcher:
     build: .

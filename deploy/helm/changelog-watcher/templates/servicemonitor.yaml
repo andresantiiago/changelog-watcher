@@ -20,7 +20,7 @@ spec:
       interval: {{ .Values.metrics.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
       {{- if .Values.metrics.token }}
-      # O Secret precisa estar no namespace do ServiceMonitor (o do release, por padrão).
+      # The Secret must be in the ServiceMonitor's namespace (the release's, by default).
       authorization:
         type: Bearer
         credentials:

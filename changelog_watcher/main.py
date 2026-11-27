@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 from sqlalchemy import text
 
+from . import i18n
+from .i18n import _
 from . import __version__
 from .api import router
 from .config import get_settings
@@ -43,7 +45,7 @@ async def lifespan(app: FastAPI):
     init_engine()
     logstore.install()
     if is_memory(settings.database_url):
-        log.warning("banco em memória: os dados serão perdidos ao reiniciar (use um arquivo SQLite em volume persistente para mantê-los)")
+        log.warning("in-memory database: data is lost on restart (use a SQLite file on a persistent volume to keep it)")
     if settings.config_file:
         with session_scope() as s:
             stats = load_seed(s, settings.config_file, overwrite=settings.seed_overwrite)
@@ -62,11 +64,12 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Changelog Watcher", version=__version__, lifespan=lifespan)
     settings = get_settings()
+    i18n.reset()  # language: env var / Settings page of this app's database
 
     has_auth = bool(settings.auth_username and settings.auth_password)
     if not has_auth and not settings.auth_disabled:
         # Fail closed: an open API lets anyone reconfigure the app and reach internal hosts.
-        raise RuntimeError("defina AUTH_USERNAME e AUTH_PASSWORD (ou AUTH_DISABLED=true para rodar sem autenticação)")
+        raise RuntimeError("set AUTH_USERNAME and AUTH_PASSWORD (or AUTH_DISABLED=true to run without authentication)")
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):
@@ -74,7 +77,7 @@ def create_app() -> FastAPI:
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
             if origin and urlsplit(origin).netloc != request.headers.get("host"):
-                return JSONResponse({"detail": "requisição de outra origem bloqueada"}, status_code=403)
+                return JSONResponse({"detail": _("cross-origin request blocked")}, status_code=403)
         return await call_next(request)
 
     if has_auth:

@@ -8,15 +8,16 @@ from datetime import datetime, timezone
 
 import httpx
 
+from .i18n import _
 from . import safehttp
 from .config import expand_env, get_settings
 from .models import Report, Webhook, utcnow
-from .report import STATUS_ICON, _pct
+from .report import EOL_ICON, STATUS_ICON, _pct, eol_when
 
 log = logging.getLogger(__name__)
 
 WEBHOOK_KINDS = {
-    "generic": "JSON genérico",
+    "generic": "Generic JSON",
     "slack": "Slack",
     "teams": "Microsoft Teams (Workflows / Adaptive Card)",
     "discord": "Discord",
@@ -43,42 +44,53 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
     out["drift"] = [r for r in out["drift"]
                     if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1]
     out["drift_pairs"] = [p for p in data["drift_pairs"] if p["source"] in names and p["target"] in names]
+    out["eol"] = [o for o in data.get("eol") or [] if o["environment_id"] in ids]
     return out
 
 
 def chat_lines(data: dict, max_items: int = 25) -> list[str]:
     """Compact, table-free text used by chat integrations (standard markdown)."""
-    lines = [f"**📦 Relatório de atualizações – {data['period_start'][:10]} → {data['period_end'][:10]}**", ""]
+    lines = [_("**📦 Update report – {start} → {end}**", start=data["period_start"][:10], end=data["period_end"][:10]), ""]
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            f"**{s['environment']}**: {_pct(s['up_to_date_ratio'])} atualizado · {s['total']} apps · pendentes: "
-            f"🟡 {s['patch_pending']} bugfix · 🟠 {s['minor_pending']} minor · 🔴 {s['major_pending']} major"
-            + (f" · ⚪ {c['unknown']} sem versão" if c["unknown"] else "")
-            + f" · {s['libyears']:.1f} libyears"
+            _("**{env}**: {pct} up to date · {total} apps · pending: ", env=s["environment"],
+              pct=_pct(s["up_to_date_ratio"]), total=s["total"])
+            + f"🟡 {s['patch_pending']} {_('bugfix')} · 🟠 {s['minor_pending']} minor · 🔴 {s['major_pending']} major"
+            + (_(" · 🔵 {n} within tolerance", n=c["tolerated"]) if c.get("tolerated") else "")
+            + (_(" · ⚪ {n} without version", n=c["unknown"]) if c["unknown"] else "")
+            + (_(" · {n} libyears on average", n=f"{s['libyears_avg']:.2f}") if s.get("libyears_avg") is not None else "")
         )
     releases = data["new_releases"]
-    lines += ["", f"**Novas versões ({len(releases)})**"]
+    lines += ["", _("**New versions ({n})**", n=len(releases))]
     for r in releases[:max_items]:
         tag = f"[{r['tag']}]({r['url']})" if r.get("url") else r["tag"]
         lines.append(f"• {STATUS_ICON.get(r['level'], '•')} {r['project']} {tag}")
     if len(releases) > max_items:
-        lines.append(f"• … e mais {len(releases) - max_items}")
+        lines.append(_("• … and {n} more", n=len(releases) - max_items))
     outdated = [o for o in data["outdated"] if o["status"] != "unknown"]
-    lines += ["", f"**Desatualizadas ({len(outdated)})**"]
+    lines += ["", _("**Outdated ({n})**", n=len(outdated))]
     for o in outdated[:max_items]:
         avail = " / ".join(
             f"{k} {o[f'latest_{k}']}" for k in ("patch", "minor", "major") if o.get(f"latest_{k}")
-        ).replace("patch", "bugfix")
+        ).replace("patch", _("bugfix"))
         lines.append(
             f"• {STATUS_ICON[o['status']]} {o['environment']} · {o['project']} {o['current_version']} → {avail} "
             f"({o['outdated_days']:.0f}d)"
         )
     if len(outdated) > max_items:
-        lines.append(f"• … e mais {len(outdated) - max_items}")
+        lines.append(_("• … and {n} more", n=len(outdated) - max_items))
+    eol = data.get("eol") or []
+    if eol:
+        lines += ["", _("**End of life (EOL) ({n})**", n=len(eol))]
+        for o in eol[:max_items]:
+            lines.append(f"• {EOL_ICON[o['eol_status']]} {o['environment']} · {o['project']} {o['current_version']} "
+                         f"({o['eol_product']} {o['eol_cycle']}): {eol_when(o)}")
+        if len(eol) > max_items:
+            lines.append(_("• … and {n} more", n=len(eol) - max_items))
     if data["drift"]:
         env_names = {str(e["id"]): e["name"] for e in data["environments"]}
-        lines += ["", f"**Diferenças entre ambientes ({len(data['drift'])})**"]
+        lines += ["", _("**Differences between environments ({n})**", n=len(data["drift"]))]
         for row in data["drift"][:max_items]:
             vs = ", ".join(f"{env_names.get(k, k)}={v['version'] or '?'}" for k, v in row["environments"].items())
             lines.append(f"• {row['project']}: {vs}")
@@ -129,11 +141,11 @@ def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
 
 async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: httpx.AsyncClient) -> dict:
     data = filter_data(data, webhook.environment_ids)
-    if webhook.only_outdated and not any(o["status"] != "unknown" for o in data["outdated"]):
-        return {"webhook": webhook.name, "ok": True, "skipped": True, "detail": "nada desatualizado"}
+    if webhook.only_outdated and not data.get("eol") and not any(o["status"] != "unknown" for o in data["outdated"]):
+        return {"webhook": webhook.name, "ok": True, "skipped": True, "detail": _("nothing outdated")}
     url = expand_env(webhook.url)
     if not url:
-        return {"webhook": webhook.name, "ok": False, "detail": "URL vazia"}
+        return {"webhook": webhook.name, "ok": False, "detail": _("empty URL")}
     from .report import render_markdown
 
     if webhook.environment_ids:
@@ -144,14 +156,14 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
             resp = await client.post(url, json=payload)
             if resp.status_code >= 300:
                 return {"webhook": webhook.name, "ok": False, "detail": f"HTTP {resp.status_code}"}  # no body: SSRF read
-        return {"webhook": webhook.name, "ok": True, "detail": f"{len(payloads)} mensagem(ns) enviada(s)"}
+        return {"webhook": webhook.name, "ok": True, "detail": _("{n} message(s) sent", n=len(payloads))}
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
         return {"webhook": webhook.name, "ok": False, "detail": str(exc)}
 
 
 def record_status(webhook: Webhook, result: dict, suffix: str = "") -> None:
     webhook.last_sent_at = utcnow()
-    webhook.last_status = ("OK" if result["ok"] else "ERRO") + f": {result.get('detail', '')}{suffix}"
+    webhook.last_status = ("OK" if result["ok"] else _("ERROR")) + f": {result.get('detail', '')}{suffix}"
 
 
 async def deliver_report(session, report: Report, webhooks: list[Webhook]) -> list[dict]:

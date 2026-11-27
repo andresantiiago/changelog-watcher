@@ -21,6 +21,7 @@ from .analysis import (
 )
 from .config import get_settings
 from .db import session_scope
+from .eol import EOL_LEVEL
 from .versioning import STATUS_ORDER
 
 log = logging.getLogger(__name__)
@@ -64,25 +65,31 @@ class WatcherCollector(Collector):
 
         info = GaugeMetricFamily(
             P + "app_info",
-            "Versões da aplicação em um ambiente (valor sempre 1)",
+            "Application versions in an environment (always 1)",
             labels=["project", "environment", "current_version", "latest_version", "latest_patch", "latest_minor",
                     "latest_major", "status", "version_source"],
         )
         level = GaugeMetricFamily(P + "app_update_level",
-                                  "Nível da atualização pendente: -1 desconhecido, 0 atualizado, 1 bugfix, 2 minor, 3 major",
+                                  "Pending update level: -1 unknown, 0 up to date, 1 bugfix, 2 minor, 3 major",
                                   labels=["project", "environment"])
-        available = GaugeMetricFamily(P + "app_update_available", "1 se há atualização do tipo indicado",
+        available = GaugeMetricFamily(P + "app_update_available", "1 if an update of the given type is available",
                                       labels=["project", "environment", "type"])
-        behind = GaugeMetricFamily(P + "app_versions_behind", "Quantidade de versões atrás",
+        behind = GaugeMetricFamily(P + "app_versions_behind", "Number of versions behind",
                                    labels=["project", "environment", "type"])
         outdated_days = GaugeMetricFamily(P + "app_outdated_days",
-                                          "Dias desde a publicação da primeira versão mais nova que a implantada",
+                                          "Days since the first version newer than the deployed one was published",
                                           labels=["project", "environment"])
         libyears = GaugeMetricFamily(P + "app_libyears",
-                                     "Anos entre a versão implantada e a mais recente (libyear)",
+                                     "Years between the deployed and the latest version (libyear)",
                                      labels=["project", "environment"])
-        det_err = GaugeMetricFamily(P + "app_detection_error", "1 se a detecção via Prometheus falhou",
+        det_err = GaugeMetricFamily(P + "app_detection_error", "1 if the Prometheus detection failed",
                                     labels=["project", "environment"])
+        eol_level = GaugeMetricFamily(P + "app_eol_level",
+                                      "End of life of the cycle in use: 0 supported, 1 EOL soon, 2 EOL reached",
+                                      labels=["project", "environment", "product", "cycle"])
+        eol_days = GaugeMetricFamily(P + "app_eol_days_left",
+                                     "Days until the end of life of the cycle in use (negative when past)",
+                                     labels=["project", "environment", "product", "cycle"])
         for st in statuses:
             lbl = [st.project, st.environment]
             info.add_metric(lbl + [st.current_version or "", st.latest_version or "", st.latest_patch or "",
@@ -97,22 +104,32 @@ class WatcherCollector(Collector):
                 libyears.add_metric(lbl, st.libyears)
             if st.version_source == "prometheus":
                 det_err.add_metric(lbl, 1 if st.detection_error else 0)
-        yield from (info, level, available, behind, outdated_days, libyears, det_err)
+            if st.eol_status:
+                eol_lbl = lbl + [st.eol_product or "", st.eol_cycle or ""]
+                eol_level.add_metric(eol_lbl, EOL_LEVEL[st.eol_status])
+                if st.eol_days_left is not None:
+                    eol_days.add_metric(eol_lbl, st.eol_days_left)
+        yield from (info, level, available, behind, outdated_days, libyears, det_err, eol_level, eol_days)
 
-        env_apps = GaugeMetricFamily(P + "environment_apps", "Aplicações por status no ambiente",
+        env_apps = GaugeMetricFamily(P + "environment_apps", "Deployments by status in the environment",
                                      labels=["environment", "status"])
         env_pending = GaugeMetricFamily(P + "environment_apps_pending",
-                                        "Aplicações com atualização do tipo indicado (não exclusivo)",
+                                        "Deployments with an update of the given type (not exclusive)",
                                         labels=["environment", "type"])
         env_ratio = GaugeMetricFamily(P + "environment_up_to_date_ratio",
-                                      "Fração de aplicações atualizadas (desconsidera desconhecidas)", labels=["environment"])
-        env_total = GaugeMetricFamily(P + "environment_apps_total", "Total de aplicações no ambiente", labels=["environment"])
-        env_lib = GaugeMetricFamily(P + "environment_libyears_total", "Soma de libyears no ambiente", labels=["environment"])
-        env_avg = GaugeMetricFamily(P + "environment_outdated_days_avg", "Média de dias desatualizado", labels=["environment"])
-        env_max = GaugeMetricFamily(P + "environment_outdated_days_max", "Maior atraso em dias", labels=["environment"])
-        env_behind = GaugeMetricFamily(P + "environment_versions_behind_total", "Soma de versões atrás",
+                                      "Fraction of up-to-date deployments (unknown ones excluded)", labels=["environment"])
+        env_total = GaugeMetricFamily(P + "environment_apps_total", "Total deployments in the environment", labels=["environment"])
+        env_lib = GaugeMetricFamily(P + "environment_libyears_total", "Sum of libyears in the environment", labels=["environment"])
+        env_lib_avg = GaugeMetricFamily(P + "environment_libyears_avg",
+                                        "Average libyears per deployment in the environment", labels=["environment"])
+        env_avg = GaugeMetricFamily(P + "environment_outdated_days_avg", "Average days outdated", labels=["environment"])
+        env_max = GaugeMetricFamily(P + "environment_outdated_days_max", "Largest delay in days", labels=["environment"])
+        env_behind = GaugeMetricFamily(P + "environment_versions_behind_total", "Sum of versions behind",
                                        labels=["environment"])
-        env_age = GaugeMetricFamily(P + "environment_apps_by_age", "Aplicações desatualizadas por faixa de atraso",
+        env_eol = GaugeMetricFamily(P + "environment_apps_eol",
+                                    "Deployments whose end of life is near (soon) or reached (eol)",
+                                    labels=["environment", "status"])
+        env_age = GaugeMetricFamily(P + "environment_apps_by_age", "Outdated deployments by delay bucket",
                                     labels=["environment", "bucket"])
         for summ in summaries:
             env = summ["environment"]
@@ -124,31 +141,36 @@ class WatcherCollector(Collector):
                 env_ratio.add_metric([env], summ["up_to_date_ratio"])
             env_total.add_metric([env], summ["total"])
             env_lib.add_metric([env], summ["libyears"])
+            if summ["libyears_avg"] is not None:
+                env_lib_avg.add_metric([env], summ["libyears_avg"])
             env_avg.add_metric([env], summ["avg_outdated_days"])
             env_max.add_metric([env], summ["max_outdated_days"])
             env_behind.add_metric([env], summ["versions_behind"])
+            env_eol.add_metric([env, "soon"], summ["eol_soon"])
+            env_eol.add_metric([env, "eol"], summ["eol_reached"])
             for bucket, n in summ["age_buckets"].items():
                 env_age.add_metric([env, bucket], n)
-        yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_avg, env_max, env_behind, env_age)
+        yield from (env_apps, env_pending, env_ratio, env_total, env_lib, env_lib_avg, env_avg, env_max, env_behind,
+                    env_eol, env_age)
 
         # Drift between environments.
         mismatch = GaugeMetricFamily(P + "project_version_mismatch",
-                                     "1 se a aplicação roda versões diferentes entre ambientes", labels=["project"])
-        distinct = GaugeMetricFamily(P + "project_distinct_versions", "Versões distintas implantadas", labels=["project"])
+                                     "1 if the application runs different versions across environments", labels=["project"])
+        distinct = GaugeMetricFamily(P + "project_distinct_versions", "Distinct deployed versions", labels=["project"])
         for row in version_matrix(statuses):
             mismatch.add_metric([row["project"]], int(row["drift"]))
             distinct.add_metric([row["project"]], row["distinct_versions"])
         pair = GaugeMetricFamily(P + "environment_pair_different_apps",
-                                 "Aplicações com versões diferentes entre dois ambientes",
+                                 "Applications with different versions between two environments",
                                  labels=["source_environment", "target_environment"])
         for p in pairs:
             pair.add_metric([p["source"], p["target"]], p["different"])
         yield from (mismatch, distinct, pair)
 
         latest_ts = GaugeMetricFamily(P + "release_latest_timestamp_seconds",
-                                      "Data de publicação da versão mais recente", labels=["project", "version"])
-        week = GaugeMetricFamily(P + "releases_last_7d", "Versões publicadas nos últimos 7 dias", labels=["project"])
-        src_err = GaugeMetricFamily(P + "project_source_error", "1 se a última coleta de releases falhou",
+                                      "Publication date of the latest version", labels=["project", "version"])
+        week = GaugeMetricFamily(P + "releases_last_7d", "Versions published in the last 7 days", labels=["project"])
+        src_err = GaugeMetricFamily(P + "project_source_error", "1 if the last release fetch failed",
                                     labels=["project", "source_type"])
         for p, latest, entry, n in latest_release:
             if latest and entry and entry.published_at:
@@ -157,10 +179,10 @@ class WatcherCollector(Collector):
             src_err.add_metric([p.name, p.source_type], 1 if p.last_error else 0)
         yield from (latest_ts, week, src_err)
 
-        last = GaugeMetricFamily(P + "last_refresh_timestamp_seconds", "Fim da última atualização")
+        last = GaugeMetricFamily(P + "last_refresh_timestamp_seconds", "End of the last refresh")
         if STATE.finished_at:
             last.add_metric([], STATE.finished_at.timestamp())
-        ok = GaugeMetricFamily(P + "last_refresh_success", "1 se a última atualização terminou sem erros")
+        ok = GaugeMetricFamily(P + "last_refresh_success", "1 if the last refresh finished without errors")
         if STATE.success is not None:
             ok.add_metric([], 1 if STATE.success else 0)
         yield from (last, ok)

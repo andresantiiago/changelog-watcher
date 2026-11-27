@@ -18,6 +18,8 @@ from . import safehttp
 from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
 from .db import session_scope
+from .eol import refresh_eol
+from .i18n import _
 from .models import SNAPSHOT_FIELDS, Deployment, Project, Release, Snapshot, utcnow
 from .sources import SourceError, fetch_releases
 
@@ -127,7 +129,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
                 return dep.id, None, str(exc)
             except Exception as exc:  # pragma: no cover - defensive
                 log.exception("detection failed")
-                return dep.id, None, f"erro inesperado: {exc}"
+                return dep.id, None, _("unexpected error: {error}", error=exc)
 
     results = await asyncio.gather(*(one(d) for d in deps))
     env_names = {d.id: d.environment.name for d in deps}
@@ -150,7 +152,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
                 dep.detection_error = err
                 failed += 1
                 errors.append(f"{names[dep_id]}: {err}")
-                log.warning("detecção falhou: %s: %s", names[dep_id], err)
+                log.warning("detection failed: %s: %s", names[dep_id], err)
                 DETECTIONS.labels(env_names[dep_id], "error").inc()
     return ok, failed, errors
 
@@ -174,7 +176,7 @@ def store_snapshots() -> None:
 async def run_refresh(project_ids: list[int] | None = None, detect: bool = True) -> dict:
     """Run a full (or partial) refresh. Concurrent calls wait for the running one."""
     if _LOCK.locked() and project_ids is None:
-        return {**STATE.to_dict(), "message": "atualização já em andamento"}
+        return {**STATE.to_dict(), "message": _("refresh already running")}
     async with _LOCK:
         settings = get_settings()
         STATE.running = True
@@ -213,14 +215,20 @@ async def run_refresh(project_ids: list[int] | None = None, detect: bool = True)
                             log.warning("release fetch failed: %s", exc)
 
                 await asyncio.gather(*(one(pid) for pid in ids))
+                if settings.eol_enabled and ids:
+                    try:
+                        STATE.errors.extend(await refresh_eol(ids, client))
+                    except Exception as exc:  # EOL is best effort: never fails the refresh
+                        log.exception("EOL refresh failed")
+                        STATE.errors.append(f"EOL: {exc}")
             store_snapshots()
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
-            log.info("atualização concluída: %s projeto(s) ok, %s com erro, %s novas versões", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
+            log.info("refresh finished: %s project(s) ok, %s failed, %s new versions", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
             REFRESH_TOTAL.labels("ok" if STATE.success else "partial").inc()
         except Exception as exc:
             log.exception("refresh failed")
             STATE.success = False
-            STATE.errors.append(f"falha geral: {exc}")
+            STATE.errors.append(_("general failure: {error}", error=exc))
             REFRESH_TOTAL.labels("error").inc()
         finally:
             STATE.running = False

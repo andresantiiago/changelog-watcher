@@ -5,6 +5,7 @@ from datetime import datetime
 
 import httpx
 
+from ..i18n import _
 from ..models import aware
 
 
@@ -42,12 +43,12 @@ def parse_datetime(value) -> datetime | None:
 async def get_json(client: httpx.AsyncClient, url: str, **kwargs):
     resp = await client.get(url, **kwargs)
     if resp.status_code == 404:
-        raise SourceError(f"não encontrado: {url}")
+        raise SourceError(_("not found: {url}", url=url))
     if resp.status_code in (401, 403):
         detail = resp.headers.get("x-ratelimit-remaining")
         if detail == "0":
-            raise SourceError("limite de requisições da API atingido (configure um token)")
-        raise SourceError(f"acesso negado ({resp.status_code}) em {url}")
+            raise SourceError(_("API rate limit reached (configure a token)"))
+        raise SourceError(_("access denied ({status}) at {url}", status=resp.status_code, url=url))
     resp.raise_for_status()
     return resp
 

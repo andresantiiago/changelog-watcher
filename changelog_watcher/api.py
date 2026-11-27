@@ -4,20 +4,24 @@ import asyncio
 from datetime import timedelta
 from itertools import islice
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import logstore, safehttp
+from .i18n import _
+from . import eol, i18n, logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
+    TOLERANCE_KEYS,
     _iso,
     changelog_between,
     compare_environments,
     compute_statuses,
     drift_pairs,
+    global_tolerance,
     load_environments,
     project_versions,
     recent_releases,
@@ -57,8 +61,9 @@ from .schemas import (
     WebhookIn,
     WebhookOut,
 )
-from .sources import SOURCE_TYPES
+from .sources import SOURCE_TYPES, SourceError
 from .suggest import suggest_sources
+from .versioning import STATUS_OUTDATED
 from .webhooks import WEBHOOK_KINDS, deliver_report, record_status, send_webhook
 
 router = APIRouter(prefix="/api")
@@ -74,7 +79,7 @@ def _spawn(coro) -> None:
 def _get(session: Session, model, obj_id: int):
     obj = session.get(model, obj_id)
     if obj is None:
-        raise HTTPException(404, f"{model.__name__} {obj_id} não encontrado")
+        raise HTTPException(404, _("{model} {id} not found", model=model.__name__, id=obj_id))
     return obj
 
 
@@ -83,18 +88,20 @@ def _commit(session: Session):
         session.flush()
     except IntegrityError as exc:
         session.rollback()
-        raise HTTPException(409, "já existe um registro com esse nome") from exc
+        raise HTTPException(409, _("a record with this name already exists")) from exc
 
 
 # ------------------------------------------------------------------- meta
 @router.get("/meta")
-def meta():
+def meta(db: Session = Depends(get_db)):
     s = get_settings()
     sch = effective_schedule()
     return {
-        "source_types": SOURCE_TYPES,
-        "webhook_kinds": WEBHOOK_KINDS,
-        "detection_modes": DETECTION_MODES,
+        "language": i18n.get_language(),
+        "languages": i18n.LANGUAGES,
+        "source_types": {k: _(v) for k, v in SOURCE_TYPES.items()},
+        "webhook_kinds": {k: _(v) for k, v in WEBHOOK_KINDS.items()},
+        "detection_modes": {k: _(v) for k, v in DETECTION_MODES.items()},
         "age_buckets": [b[0] for b in AGE_BUCKETS],
         "schedule": {
             "refresh_interval_minutes": sch["refresh_interval_minutes"],
@@ -103,6 +110,8 @@ def meta():
             "next_runs": next_runs(),
         },
         "github_token": bool(s.github_token),
+        "eol": {"enabled": s.eol_enabled, "warning_days": s.eol_warning_days, "auto_match": s.eol_auto_match},
+        "tolerance": global_tolerance(db),
         "public_url": s.public_url,
     }
 
@@ -123,7 +132,7 @@ def _apply_body(obj, body: BaseModel, secrets: tuple[str, ...], url_field: str |
     for key, value in data.items():
         if key in secrets and value == SECRET_MASK:
             if url_changed:
-                raise HTTPException(422, f"informe {key} novamente ao trocar {url_field}")
+                raise HTTPException(422, _("enter {key} again when changing {url_field}", key=key, url_field=url_field))
             continue  # unchanged secret
         setattr(obj, key, value)
 
@@ -170,17 +179,12 @@ async def test_environment(env_id: int, db: Session = Depends(get_db)):
 
 @router.get("/environments/{env_id}/discover")
 async def discover_environment(env_id: int, namespace: str | None = None, db: Session = Depends(get_db)):
-    """Workloads of a namespace grouped by Helm release, with the project that already tracks each group."""
+    """Workloads of a namespace grouped by Helm release, one component per image, with the project tracking each."""
     env = _get(db, Environment, env_id)
     try:
-        groups = await prom.discover(env, (namespace or "").strip() or None)
+        groups = await prom.discover(env, (namespace or "").strip() or None, db.scalars(select(Project)).all())
     except prom.PrometheusError as exc:
         return {"ok": False, "error": str(exc)}
-    tracked = {(p.workload_namespace, p.workload_name): p for p in db.scalars(select(Project))}
-    for g in groups:
-        s = g["suggestion"]
-        p = tracked.get((s["workload_namespace"], s.get("workload_name")))
-        g["project"] = {"id": p.id, "name": p.name} if p else None
     return {"ok": True, "groups": groups}
 
 
@@ -191,6 +195,24 @@ async def suggest_source(name: str | None = None, image: str | None = None, char
     async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
                                  headers={"User-Agent": "changelog-watcher"}) as client:
         return {"candidates": await suggest_sources(client, s, name=name, image=image, chart=chart)}
+
+
+@router.get("/eol/products")
+async def eol_products(project_id: int | None = None, db: Session = Depends(get_db)):
+    """endoflife.date products (for the form's autocomplete) and, with ``project_id``, its automatic match."""
+    s = get_settings()
+    if not s.eol_enabled:
+        return {"enabled": False, "products": [], "suggested": None, "error": None}
+    async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
+                                 headers={"User-Agent": "changelog-watcher"}) as client:
+        try:
+            products = await eol.fetch_products(client, s)
+        except (SourceError, httpx.HTTPError, ValueError) as exc:
+            return {"enabled": True, "products": [], "suggested": None, "error": _("endoflife.date unavailable: {error}", error=exc)}
+    suggested = None
+    if project_id is not None:
+        suggested = eol.auto_match(_get(db, Project, project_id), products)
+    return {"enabled": True, "products": products, "suggested": suggested, "error": None}
 
 
 # --------------------------------------------------------------- projects
@@ -208,7 +230,7 @@ def _apply_project(db: Session, project: Project, body: ProjectIn) -> None:
         if isinstance(value, str):
             value = value.strip() or None
             if key in ("name", "repository") and value is None:
-                raise HTTPException(422, f"{key} é obrigatório")
+                raise HTTPException(422, _("{key} is required", key=key))
         setattr(project, key, value)
     if body.deployments is None:
         return
@@ -217,7 +239,7 @@ def _apply_project(db: Session, project: Project, body: ProjectIn) -> None:
     existing = {d.environment_id: d for d in project.deployments}
     for env_id, dep_in in body.deployments.items():
         if env_id not in env_ids:
-            raise HTTPException(422, f"ambiente {env_id} não existe")
+            raise HTTPException(422, _("environment {id} does not exist", id=env_id))
         dep = existing.pop(env_id, None)
         if dep is None:
             dep = Deployment(project_id=project.id, environment_id=env_id)
@@ -330,7 +352,7 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
         statuses = [st for st in statuses if st.namespace == namespace]
     overall = summarize(statuses)
     most_outdated = sorted(
-        (s for s in statuses if s.status not in ("up_to_date", "unknown")),
+        (s for s in statuses if s.status in STATUS_OUTDATED),
         key=lambda s: (-s.outdated_days, -s.level),
     )[:15]
     counts_projects = db.scalar(select(func.count()).select_from(Project))
@@ -339,6 +361,10 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
         "overall": overall,
         "environments": summaries_by_environment(statuses, envs),
         "most_outdated": [s.to_dict() for s in most_outdated],
+        "eol": [s.to_dict() for s in sorted(
+            (s for s in statuses if s.eol_status in ("eol", "soon")),
+            key=lambda s: (s.eol_status != "eol", s.eol_days_left if s.eol_days_left is not None else -10**6),
+        )[:15]],
         "drift_pairs": drift_pairs(statuses, envs),
         "drift_count": sum(1 for r in version_matrix(statuses) if r["drift"]),
         "projects": counts_projects,
@@ -352,11 +378,17 @@ def history(days: int = 90, environment_id: list[int] | None = Query(None), db: 
     stmt = select(Snapshot, Environment.name).join(Environment).where(Snapshot.day >= since)
     if environment_id:
         stmt = stmt.where(Snapshot.environment_id.in_(environment_id))
-    return [
-        {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
-         **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
-        for snap, env_name in db.execute(stmt.order_by(Snapshot.day))
-    ]
+    out = []
+    for snap, env_name in db.execute(stmt.order_by(Snapshot.day)):
+        row = {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
+               **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
+        if row["libyears_avg"] is None and snap.libyears:
+            # Snapshots from before libyears_avg existed: approximate it from the sum.
+            known = (snap.total or 0) - (snap.unknown or 0)
+            if known > 0 and snap.libyears is not None:
+                row["libyears_avg"] = round(snap.libyears / known, 3)
+        out.append(row)
+    return out
 
 
 @router.get("/matrix")
@@ -385,10 +417,10 @@ async def refresh(body: RefreshRequest | None = None):
     if body.wait:
         return await run_refresh(body.project_ids, detect=body.detect)
     if STATE.running:
-        return {**STATE.to_dict(), "message": "atualização já em andamento"}
+        return {**STATE.to_dict(), "message": _("refresh already running")}
     _spawn(run_refresh(body.project_ids, detect=body.detect))
     await asyncio.sleep(0)
-    return {**STATE.to_dict(), "running": True, "message": "atualização iniciada"}
+    return {**STATE.to_dict(), "running": True, "message": _("refresh started")}
 
 
 @router.get("/refresh/status")
@@ -470,7 +502,7 @@ def list_webhooks(db: Session = Depends(get_db)):
 @router.post("/webhooks", status_code=201)
 def create_webhook(body: WebhookIn, db: Session = Depends(get_db)):
     if body.url == SECRET_MASK:
-        raise HTTPException(422, "informe a URL")
+        raise HTTPException(422, _("enter the URL"))
     w = Webhook()
     _apply_body(w, body, ("url",))
     db.add(w)
@@ -500,7 +532,7 @@ async def test_webhook(hook_id: int, db: Session = Depends(get_db)):
     data = build_report_data(db)
     async with safehttp.client(timeout=get_settings().http_timeout) as client:
         result = await send_webhook(w, data, render_markdown(data), client)
-    record_status(w, result, " (teste)")
+    record_status(w, result, _(" (test)"))
     return result
 
 
@@ -509,15 +541,21 @@ class SettingsIn(BaseModel):
     report_cron: str = Field(min_length=1)
     # upper bound: an overflowing interval is saved, then breaks the scheduler on every startup
     refresh_interval_minutes: int = Field(ge=0, le=1_000_000)
+    language: str | None = None  # omitted: unchanged
+    # Outdated tolerance: null disables the criterion; omitted: unchanged.
+    tolerance_days: int | None = Field(None, ge=0)
+    tolerance_minors: int | None = Field(None, ge=0)
+    tolerance_bugfixes: int | None = Field(None, ge=0)
 
 
-def _settings_out() -> dict:
-    return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs()}
+def _settings_out(db: Session) -> dict:
+    return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs(),
+            "language": i18n.get_language(), "languages": i18n.LANGUAGES, **global_tolerance(db)}
 
 
 @router.get("/settings")
-def get_app_settings():
-    return _settings_out()
+def get_app_settings(db: Session = Depends(get_db)):
+    return _settings_out(db)
 
 
 @router.put("/settings")
@@ -526,14 +564,23 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
     try:
         CronTrigger.from_crontab(cron)
     except ValueError as exc:
-        raise HTTPException(422, f"expressão cron inválida: {exc}") from exc
-    for key, value in (("report_cron", cron), ("refresh_interval_minutes", str(body.refresh_interval_minutes))):
+        raise HTTPException(422, _("invalid cron expression: {error}", error=exc)) from exc
+    values = [("report_cron", cron), ("refresh_interval_minutes", str(body.refresh_interval_minutes))]
+    if body.language is not None:
+        if body.language not in i18n.LANGUAGES:
+            raise HTTPException(422, _("unsupported language: {value}", value=body.language))
+        values.append(("language", body.language))
+    values += [(k, "" if getattr(body, k) is None else str(getattr(body, k)))
+               for k in TOLERANCE_KEYS if k in body.model_fields_set]
+    for key, value in values:
         row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
         row.value = value
         db.add(row)
     db.commit()
+    if body.language is not None:
+        i18n.set_language(body.language)
     reschedule()
-    return _settings_out()
+    return _settings_out(db)
 
 
 # ------------------------------------------------------------------- logs

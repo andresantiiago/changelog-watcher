@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "changelog-watcher"
 version = "1.0.0"
-description = "Monitora changelogs/releases de aplicações, compara com as versões implantadas em cada ambiente e gera relatórios, métricas e alertas."
+description = "Watches application changelogs/releases, compares them with the versions deployed in each environment and builds reports, metrics and alerts."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

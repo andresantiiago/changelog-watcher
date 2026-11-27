@@ -1,14 +1,14 @@
 image:
   repository: ghcr.io/andresantiiago/changelog-watcher
-  tag: ""            # padrão: .Chart.AppVersion
+  tag: ""            # default: .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Sempre 1 réplica: o banco SQLite e o agendador interno (refresh + relatório semanal)
-# rodam dentro do processo.
+# Always 1 replica: the SQLite database and the internal scheduler (refresh + weekly report)
+# run inside the process.
 
 serviceAccount:
   create: true
@@ -59,44 +59,63 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
-# ---------------------------------------------------------------- aplicação
+# -------------------------------------------------------------- application
 config:
+  # Interface, report and webhook language: en (default) or pt-BR. The Settings page can
+  # override it; also picks the Grafana dashboard language (grafana.dashboard) and the alerts'.
+  language: en
   timezone: America/Sao_Paulo
-  # URL pública da interface, usada nos links do relatório.
+  # Public URL of the UI, used in the report links.
   publicUrl: ""
   refreshIntervalMinutes: 360
   refreshOnStartup: true
-  # Cron (5 campos) do relatório semanal – segunda 09:00.
+  # Cron (5 fields) of the weekly report – Monday 09:00.
   reportCron: "0 9 * * mon"
   reportDays: 7
   reportSendEnabled: true
   maxReleasePages: 3
   logLevel: INFO
-  # Se true, o arquivo de seed (abaixo) sobrescreve alterações feitas pela UI.
+  # End of life (EOL) from endoflife.date.
+  eol:
+    enabled: true
+    apiUrl: https://endoflife.date/api
+    # Warns when the EOL of the cycle in use is at most N days away.
+    warningDays: 90
+    # Without a product set on the application, looks its name/repository up in endoflife.date's list.
+    autoMatch: true
+  # Outdated tolerance: a deployment behind only by bugfix/minor and inside every limit set here
+  # shows as "within tolerance" instead of outdated. "off" disables a criterion; the Settings page
+  # and each application can override these.
+  tolerance:
+    days: 60      # days since the first newer version
+    minors: 1     # minor lines behind
+    bugfixes: 3   # bugfix versions behind
+  # If true, the seed file (below) overwrites changes made in the UI.
   seedOverwrite: false
-  # Variáveis extras (não secretas).
+  # Extra (non-secret) variables.
   extraEnv: {}
 
-# Armazenamento do banco SQLite.
-#   pvc      – StatefulSet com um PVC montado em /data: os dados são MANTIDOS ao reiniciar
-#              ou atualizar o pod (o PVC também sobrevive a um `helm uninstall`).
-#   inMemory – Deployment sem volume: os dados são PERDIDOS a cada reinício; o estado volta
-#              a ser só o do `seed` e o que foi feito pela UI (histórico, relatórios) some.
-#              Útil para testes locais (ver values-kind.yaml).
+# SQLite database storage.
+#   pvc      – StatefulSet with a PVC mounted at /data: data is KEPT when the pod restarts
+#              or is upgraded (the PVC also survives a `helm uninstall`).
+#   inMemory – Deployment without a volume: data is LOST on every restart; the state goes back
+#              to the `seed` only and what was done in the UI (history, reports) is gone.
+#              Useful for local tests (see values-kind.yaml).
 persistence:
   type: pvc
-  # Campos abaixo valem só para type=pvc. O PVC vem do volumeClaimTemplates do StatefulSet,
-  # que o Kubernetes não deixa alterar depois de criado (para aumentar, edite o PVC direto).
+  # The fields below only apply to type=pvc. The PVC comes from the StatefulSet's
+  # volumeClaimTemplates, which Kubernetes does not let you change once created (edit the PVC
+  # directly to grow it).
   storageClass: gp3
   accessModes: [ReadWriteOnce]
   size: 1Gi
-  existingClaim: ""       # usar um PVC já existente em vez de criar um
+  existingClaim: ""       # use an existing PVC instead of creating one
 
-# Segredos expostos como variáveis de ambiente. Podem ser referenciados no
-# seed/UI com ${NOME}, ex.: prometheus_token: ${PROM_PROD_TOKEN}
+# Secrets exposed as environment variables. They can be referenced in the
+# seed/UI as ${NAME}, e.g. prometheus_token: ${PROM_PROD_TOKEN}
 secrets:
   create: true
-  # Usar um Secret já existente em vez de criar um.
+  # Use an existing Secret instead of creating one.
   existingSecret: ""
   values: {}
   #   GITHUB_TOKEN: ghp_xxx
@@ -104,24 +123,24 @@ secrets:
   #   PROM_PROD_TOKEN: xxx
   #   SLACK_WEBHOOK_URL: https://hooks.slack.com/services/...
 
-# Autenticação básica da UI/API (/healthz e /readyz ficam abertos; /metrics, ver metrics.token).
-# Sem password nem existingSecret, uma senha aleatória é gerada no Secret (ver NOTES do release).
-# enabled=false deixa a API aberta (AUTH_DISABLED=true): só para testes locais. Sirva a UI
-# sempre com TLS (ingress.tls): Basic Auth trafega a senha em cada requisição.
+# Basic auth of the UI/API (/healthz and /readyz stay open; /metrics, see metrics.token).
+# Without password or existingSecret, a random password is generated in the Secret (see the
+# release NOTES). enabled=false leaves the API open (AUTH_DISABLED=true): local tests only.
+# Always serve the UI over TLS (ingress.tls): Basic Auth sends the password on every request.
 auth:
   enabled: true
   username: admin
   password: ""
-  existingSecret: ""      # chaves AUTH_USERNAME e AUTH_PASSWORD
+  existingSecret: ""      # keys AUTH_USERNAME and AUTH_PASSWORD
 
-# Configuração inicial (seed) – ambientes, aplicações e webhooks.
-# É carregada a cada start; por padrão só cria o que não existe.
+# Initial configuration (seed) – environments, applications and webhooks.
+# Loaded on every start; by default it only creates what does not exist yet.
 seed:
   environments: []
-  #  - name: desenvolvimento
+  #  - name: development
   #    prometheus_url: http://prometheus-dev.monitoring:9090
-  #  - name: producao
-  #    prometheus_url: https://thanos.empresa.com
+  #  - name: production
+  #    prometheus_url: https://thanos.example.com
   #    prometheus_auth: bearer
   #    prometheus_token: ${PROM_PROD_TOKEN}
   #    prometheus_extra_selector: cluster="prod"
@@ -135,16 +154,16 @@ seed:
   #    workload_name: argocd-server
   #    container_name: server
   #    deployments:
-  #      desenvolvimento: {}            # versão via Prometheus
-  #      producao: {}
+  #      development: {}                # version via Prometheus
+  #      production: {}
   webhooks: []
-  #  - name: slack-plataforma
+  #  - name: slack-platform
   #    kind: slack
   #    url: ${SLACK_WEBHOOK_URL}
 
 metrics:
-  # Bearer token exigido em /metrics (gravado no Secret como METRICS_TOKEN; o ServiceMonitor
-  # passa a enviá-lo). Vazio = /metrics aberto: restrinja com networkPolicy.prometheus.
+  # Bearer token required on /metrics (stored in the Secret as METRICS_TOKEN; the
+  # ServiceMonitor sends it). Empty = /metrics open: restrict it with networkPolicy.prometheus.
   token: ""
   serviceMonitor:
     enabled: false
@@ -155,44 +174,43 @@ metrics:
   prometheusRule:
     enabled: false
     labels: {}
-    # Alerta quando existe atualização major/minor pendente há mais de N dias.
+    # Alerts when a major update has been pending for more than N days.
     outdatedDaysThreshold: 180
 
-# NetworkPolicies opcionais. Cada uma também libera DNS (porta 53).
-# ATENÇÃO: com qualquer uma ligada, o pod passa a bloquear todo egress não liberado; com
-# `prometheus` ligada, também todo ingress não liberado (inclusive o ingress controller,
-# ver allowIngressFrom).
+# Optional NetworkPolicies. Each one also allows DNS (port 53).
+# WARNING: with any of them on, the pod blocks every egress not allowed; with `prometheus`
+# on, also every ingress not allowed (the ingress controller included, see allowIngressFrom).
 networkPolicy:
-  # Comunicação com o Prometheus: scrape do /metrics (ingress) e consultas à API (egress).
+  # Traffic with Prometheus: /metrics scrape (ingress) and API queries (egress).
   prometheus:
     enabled: false
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: monitoring
-    # Restringe aos pods do Prometheus dentro do namespace; {} = todos os pods.
+    # Restricts to the Prometheus pods inside the namespace; {} = every pod.
     podSelector: {}
     #  matchLabels:
     #    app.kubernetes.io/name: prometheus
-    # Portas da API no pod (porta de destino, não a do Service); [] = todas.
+    # API ports on the pod (target port, not the Service's); [] = all.
     ports: [9090]
-    # Outras origens que podem acessar a UI/API, ex.: o ingress controller.
+    # Other sources allowed to reach the UI/API, e.g. the ingress controller.
     allowIngressFrom: []
     #  - namespaceSelector:
     #      matchLabels:
     #        kubernetes.io/metadata.name: ingress-nginx
-  # Saída para a internet: fontes de releases, webhooks e Prometheus/Thanos externos.
+  # Egress to the internet: release sources, webhooks and external Prometheus/Thanos.
   internet:
     enabled: false
-    # Destinos bloqueados (padrão: redes privadas e metadata, ou seja, só internet pública).
-    # 169.254.0.0/16: metadata da nuvem (credenciais do nó); 100.64.0.0/10: CGNAT/rede interna de alguns provedores.
+    # Blocked destinations (default: private networks and metadata, i.e. public internet only).
+    # 169.254.0.0/16: cloud metadata (node credentials); 100.64.0.0/10: CGNAT/internal network of some providers.
     except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
 
 grafana:
   dashboard:
-    # Cria um ConfigMap com o dashboard para o sidecar do Grafana.
+    # Creates a ConfigMap with the dashboard for the Grafana sidecar (language: config.language).
     enabled: false
     namespace: ""
     labels:
       grafana_dashboard: "1"
     annotations: {}
-    #  grafana_folder: Plataforma
+    #  grafana_folder: Platform

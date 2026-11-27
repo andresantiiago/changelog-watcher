@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .i18n import _
 from .sources.base import get_json
 from .sources.github import _headers as github_headers
 from .versioning import ghcr_repository, image_repository, image_tag
@@ -112,7 +113,7 @@ async def _image_source(client: httpx.AsyncClient, image: str) -> list[dict]:
     """The image's own org.opencontainers.image.source label."""
     if _registry(image)[0] not in _REGISTRIES:
         return []
-    return _source_label(await _image_labels(client, image), "label org.opencontainers.image.source da imagem")
+    return _source_label(await _image_labels(client, image), _("image label org.opencontainers.image.source"))
 
 
 async def _public_refs(client: httpx.AsyncClient, image: str) -> list[str]:
@@ -149,10 +150,10 @@ async def _mirror_source(client: httpx.AsyncClient, image: str) -> list[dict]:
             labels = await _image_labels(client, ref)
         except _NotFound:
             continue
-        out = _source_label(labels, f"label da imagem pública equivalente {ref}")
+        out = _source_label(labels, _("label of the equivalent public image {ref}", ref=ref))
         host, path = _registry(ref)
         if host == "registry-1.docker.io":
-            out.append(_candidate("dockerhub", path.removeprefix("library/"), f"imagem pública equivalente {ref}"))
+            out.append(_candidate("dockerhub", path.removeprefix("library/"), _("equivalent public image {ref}", ref=ref)))
         return out
     return []
 
@@ -177,7 +178,7 @@ async def _github_search(client: httpx.AsyncClient, settings, term: str) -> list
     norm = lambda s: re.sub(r"[-_.]", "", s.lower())  # noqa: E731
     hits = [r for r in resp.json().get("items", [])
             if norm(r["name"]) == norm(term) and r["stargazers_count"] >= _MIN_STARS]
-    return [_candidate("github_releases", r["full_name"], f"busca no GitHub (★ {r['stargazers_count']})")
+    return [_candidate("github_releases", r["full_name"], _("GitHub search (★ {stars})", stars=r["stargazers_count"]))
             for r in hits[:3]]
 
 
@@ -201,14 +202,14 @@ async def suggest_sources(client: httpx.AsyncClient, settings, name: str | None 
     results = await asyncio.gather(*(asyncio.wait_for(c, _LOOKUP_TIMEOUT) for c in lookups), return_exceptions=True)
     for r in results:
         if isinstance(r, Exception):
-            log.warning("Sugestão de fonte: consulta falhou: %r", r)
+            log.warning("source suggestion: lookup failed: %r", r)
     results = [r if isinstance(r, list) else [] for r in results]
     k, n = (2 if image else 0), len(terms)
     images, charts, repos = results[:k], results[k:k + n], results[k + n:]
     gh = ghcr_repository(repo or "")
-    ghcr = [_candidate("github_releases", gh, "imagem no ghcr.io")] if gh else []
+    ghcr = [_candidate("github_releases", gh, _("image on ghcr.io"))] if gh else []
     host, path = _registry(image) if image else ("", "")
-    hub = [_candidate("dockerhub", path.removeprefix("library/"), "imagem no Docker Hub")] \
+    hub = [_candidate("dockerhub", path.removeprefix("library/"), _("image on Docker Hub"))] \
         if host == "registry-1.docker.io" else []
 
     # Most reliable first: the image's own label (or its public equivalent's), then registry/chart

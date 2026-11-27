@@ -17,6 +17,13 @@ def _bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _limit(value: str | None, default: int) -> int | None:
+    """Empty = default, "off" = criterion disabled (Helm renders an unquoted `off` as "false")."""
+    if value is None or value.strip() == "":
+        return default
+    return None if value.strip().lower() in {"off", "false", "no", "none"} else int(value)
+
+
 @dataclass
 class Settings:
     database_url: str = "sqlite:///./data/changelog-watcher.db"
@@ -42,6 +49,15 @@ class Settings:
     scheduler_enabled: bool = True
     metrics_cache_seconds: int = 30
     log_level: str = "INFO"
+    language: str = "en"  # en | pt-BR (overridden by the Settings page)
+    eol_enabled: bool = True
+    eol_api_url: str = "https://endoflife.date/api"
+    eol_warning_days: int = 90
+    eol_auto_match: bool = True
+    # Outdated tolerance (None = criterion disabled), overridden by the Settings page / per project.
+    tolerance_days: int | None = 60
+    tolerance_minors: int | None = 1
+    tolerance_bugfixes: int | None = 3
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -70,6 +86,14 @@ class Settings:
             scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), cls.scheduler_enabled),
             metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS") or cls.metrics_cache_seconds),
             log_level=e("LOG_LEVEL") or cls.log_level,
+            language=e("APP_LANGUAGE") or cls.language,
+            eol_enabled=_bool(e("EOL_ENABLED"), cls.eol_enabled),
+            eol_api_url=(e("EOL_API_URL") or cls.eol_api_url).rstrip("/"),
+            eol_warning_days=int(e("EOL_WARNING_DAYS") or cls.eol_warning_days),
+            eol_auto_match=_bool(e("EOL_AUTO_MATCH"), cls.eol_auto_match),
+            tolerance_days=_limit(e("TOLERANCE_DAYS"), cls.tolerance_days),
+            tolerance_minors=_limit(e("TOLERANCE_MINORS"), cls.tolerance_minors),
+            tolerance_bugfixes=_limit(e("TOLERANCE_BUGFIXES"), cls.tolerance_bugfixes),
         )
 
 
@@ -98,7 +122,7 @@ def expand_env(value: str | None) -> str | None:
     if not m:
         return value
     if m.group(1) in _APP_SECRETS:
-        log.warning("placeholder ${%s} não permitido (credencial da própria aplicação)", m.group(1))
+        log.warning("placeholder ${%s} not allowed (the application's own credential)", m.group(1))
         return ""
     return os.environ.get(m.group(1), m.group(2) or "")
 

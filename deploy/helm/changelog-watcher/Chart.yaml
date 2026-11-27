@@ -1,6 +1,6 @@
 apiVersion: v2
 name: changelog-watcher
-description: Monitora releases/changelogs, compara com as versões implantadas em cada ambiente e gera relatórios, métricas e dashboard.
+description: Watches releases/changelogs, compares them with the versions deployed in each environment and builds reports, metrics and a dashboard.
 type: application
 version: v1.0.0
 appVersion: "v1.0.0"

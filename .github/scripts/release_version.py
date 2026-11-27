@@ -53,7 +53,7 @@ PATHS = {
     "chart": ("deploy/helm/changelog-watcher",),
 }
 LABELS = {"app": "imagem da aplicação", "chart": "chart Helm"}
-DOC_PATHS = ("README.md", "docs")
+DOC_PATHS = ("README.md", "README.pt-BR.md", "docs")
 CHART_TAG = "chart-"
 SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 RC = re.compile(r"^v?(\d+\.\d+\.\d+)-?rc\.?\d+$")  # v0.2.0-rc1, 0.2.0rc1 (PEP 440)

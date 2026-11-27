@@ -19,8 +19,10 @@ from dataclasses import dataclass
 
 import httpx
 
+from .i18n import _
 from . import safehttp
 from .config import expand_env
+from .suggest import chart_name as _chart_name
 from .versioning import ghcr_repository, image_repository, image_tag, parse_version
 
 
@@ -69,7 +71,7 @@ def build_query(project, deployment, environment) -> str:
     mode = project.detection_mode
     if mode == "workload":
         if not namespace or not name:
-            raise PrometheusError("defina namespace e nome do workload")
+            raise PrometheusError(_("set the namespace and workload name"))
         suffix = _POD_SUFFIX.get(project.workload_kind or "deployment", _POD_SUFFIX["deployment"])
         matchers = [f'namespace="{_q(namespace)}"', f'pod=~"{_q(re.escape(name))}{_q(suffix)}"']
         if project.container_name:
@@ -77,7 +79,7 @@ def build_query(project, deployment, environment) -> str:
         return "kube_pod_container_info{" + ", ".join(matchers) + extra + "}"
     if mode == "helm":
         if not namespace or not name:
-            raise PrometheusError("defina namespace e nome do release Helm")
+            raise PrometheusError(_("set the namespace and Helm release name"))
         ns = f'namespace="{_q(namespace)}"'
         filt = f', container="{_q(project.container_name)}"' if project.container_name else ""
         if project.image_pattern:  # pick one image when the release runs several (app + redis + ...)
@@ -91,7 +93,7 @@ def build_query(project, deployment, environment) -> str:
         return f"({by_label}) or ({by_prefix} unless on() {by_label})"
     if mode == "image":
         if not project.image_pattern:
-            raise PrometheusError("defina o padrão de imagem")
+            raise PrometheusError(_("set the image pattern"))
         matchers = [f'image=~"{_q(_image_regex(project.image_pattern))}"']
         if namespace:
             matchers.append(f'namespace="{_q(namespace)}"')
@@ -100,14 +102,14 @@ def build_query(project, deployment, environment) -> str:
         return "kube_pod_container_info{" + ", ".join(matchers) + extra + "}"
     if mode == "query":
         if not project.promql_query:
-            raise PrometheusError("defina a consulta PromQL")
+            raise PrometheusError(_("set the PromQL query"))
         return project.promql_query.replace("{namespace}", namespace or "").replace("{name}", name or "")
-    raise PrometheusError("detecção via Prometheus desabilitada para esta aplicação")
+    raise PrometheusError(_("Prometheus detection disabled for this application"))
 
 
 async def instant_query(environment, promql: str, timeout: float = 15.0) -> list[dict]:
     if not environment.prometheus_url:
-        raise PrometheusError(f"ambiente '{environment.name}' sem URL do Prometheus")
+        raise PrometheusError(_("environment '{env}' has no Prometheus URL", env=environment.name))
     url = expand_env(environment.prometheus_url).rstrip("/") + "/api/v1/query"
     headers, auth = {}, None
     if environment.prometheus_auth == "bearer" and environment.prometheus_token:
@@ -118,22 +120,35 @@ async def instant_query(environment, promql: str, timeout: float = 15.0) -> list
         async with safehttp.client(timeout=timeout, verify=environment.prometheus_verify_tls, auth=auth) as client:
             resp = await client.get(url, params={"query": promql}, headers=headers)
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
-        raise PrometheusError(f"falha ao consultar Prometheus: {exc}") from exc
+        raise PrometheusError(_("failed to query Prometheus: {error}", error=exc)) from exc
     # Never echo the body: the URL is user-configured, so it would turn this into an SSRF read.
     if resp.status_code >= 400:
-        raise PrometheusError(f"Prometheus respondeu HTTP {resp.status_code}")
+        raise PrometheusError(_("Prometheus answered HTTP {status}", status=resp.status_code))
     try:
         body = resp.json()
     except ValueError:
         body = None
     if not isinstance(body, dict):  # e.g. an HTML login page answered with 200
-        raise PrometheusError("resposta inválida: não é a API do Prometheus (confira a URL)")
+        raise PrometheusError(_("invalid response: not the Prometheus API (check the URL)"))
     if body.get("status") != "success":
-        raise PrometheusError(f"erro na consulta: {body.get('error')}")
+        raise PrometheusError(_("query error: {error}", error=body.get("error")))
     return body.get("data", {}).get("result", [])
 
 
-def pick_version(series: list[dict], version_pattern: str | None = None, two_part: bool = False) -> Detection:
+def _basename(repo: str | None) -> str:
+    return (repo or "").rsplit("/", 1)[-1]
+
+
+def _names_image(name: str, repo: str | None) -> bool:
+    """"kube-prometheus-stack-prometheus" names the image ".../prometheus/prometheus"."""
+    b = _basename(repo)
+    return bool(b) and (name == b or name.endswith("-" + b) or name.startswith(b + "-"))
+
+
+def pick_version(series: list[dict], version_pattern: str | None = None, two_part: bool = False,
+                 prefer: str | None = None) -> Detection:
+    """The image most pods run; ``prefer`` (the release/workload name) breaks ties between
+    different images ("kube-prometheus-stack-prometheus" -> prometheus, not its thanos sidecar)."""
     images: Counter[str] = Counter()
     explicit_versions: Counter[str] = Counter()
     for s in series:
@@ -155,7 +170,8 @@ def pick_version(series: list[dict], version_pattern: str | None = None, two_par
     def sort_key(item):
         image, count = item
         parsed = parse_version(image_tag(image), version_pattern)
-        return (-count, parsed or parse_version("0.0.0"))
+        named = bool(prefer) and _names_image(prefer, image_repository(image))
+        return (-count, not named, parsed or parse_version("0.0.0"))
 
     image, _ = sorted(images.items(), key=sort_key)[0]
     tag = image_tag(image)
@@ -166,12 +182,13 @@ def pick_version(series: list[dict], version_pattern: str | None = None, two_par
 async def detect(project, deployment, environment) -> Detection:
     query = build_query(project, deployment, environment)
     series = await instant_query(environment, query)
-    det = pick_version(series, project.image_version_pattern, project.version_scheme == "major_patch")
+    name = (deployment.workload_name_override if deployment else None) or project.workload_name
+    det = pick_version(series, project.image_version_pattern, project.version_scheme == "major_patch", prefer=name)
     det.query = query
     if not series:
-        raise PrometheusError(f"nenhuma série encontrada para: {query}")
+        raise PrometheusError(_("no series found for: {query}", query=query))
     if det.version is None:
-        raise PrometheusError(f"não foi possível extrair versão da imagem '{det.image}'")
+        raise PrometheusError(_("could not extract a version from image '{image}'", image=det.image))
     return det
 
 
@@ -202,15 +219,29 @@ def _release_for(workload: str, releases: list[str]) -> str | None:
     return max(hits, key=len) if hits else None
 
 
-def _suggest(group: dict) -> dict:
-    """Project fields to start monitoring a discovered group (the UI prefills its form)."""
-    repo = image_repository(group["image"]) or ""
+_LINK_LABELS = ("label_app_kubernetes_io_part_of", "label_release")  # older charts label pods release=<name>
+
+
+def _base_name(group: dict) -> str:
+    return group["release"] or group["workloads"][0]["name"]
+
+
+def _suggest(group: dict, comp: dict, multi: bool) -> dict:
+    """Project fields to start monitoring one image of a discovered group (the UI prefills its form).
+
+    When the group runs several images (app + sidecars, subcharts) each one becomes its own
+    project, pinned by ``image_pattern`` (helm/image) or ``container_name`` (workload)."""
+    repo = comp["repository"] or ""
     if group["release"]:
         out = {"name": group["release"], "detection_mode": "helm", "workload_name": group["release"]}
+        if multi:
+            out["image_pattern"] = repo
     else:
         w = group["workloads"][0]
         if w["kind"] in _POD_SUFFIX:
             out = {"name": w["name"], "detection_mode": "workload", "workload_kind": w["kind"], "workload_name": w["name"]}
+            if multi:
+                out["container_name"] = comp["containers"][0]["container"]
         else:
             out = {"name": w["name"], "detection_mode": "image", "image_pattern": repo}
     # Only ghcr.io maps reliably to a GitHub repo; otherwise the user points to the
@@ -219,12 +250,68 @@ def _suggest(group: dict) -> dict:
     return {**out, "workload_namespace": group["namespace"], "source_type": "github_releases", "repository": gh}
 
 
-async def discover(environment, namespace: str | None = None) -> list[dict]:
+def _image_matches(pattern: str, image: str | None) -> bool:
+    try:
+        return re.fullmatch(_image_regex(pattern), image or "") is not None
+    except re.error:
+        return False
+
+
+def _project_rows(project, rows: list[dict]) -> list[dict]:
+    """The discovered containers the project's detection query would select (approximation)."""
+    mode, ns = project.detection_mode, project.workload_namespace
+    if mode == "helm":
+        sel = [r for r in rows if r["namespace"] == ns and r["release"] == project.workload_name]
+    elif mode == "workload":
+        kind = project.workload_kind or "deployment"
+        sel = [r for r in rows if r["namespace"] == ns and r["kind"] == kind and r["workload"] == project.workload_name]
+    elif mode == "image" and project.image_pattern:
+        sel = [r for r in rows if not ns or r["namespace"] == ns]
+    else:
+        return []
+    if project.container_name:
+        sel = [r for r in sel if r["container"] == project.container_name]
+    if project.image_pattern and mode in ("helm", "image"):
+        sel = [r for r in sel if _image_matches(project.image_pattern, r["image"])]
+    return sel
+
+
+def _link_projects(groups: dict, rows: list[dict], projects) -> None:
+    """Mark each image component with the project already tracking it, if any."""
+    for p in sorted(projects, key=lambda p: p.id or 0):
+        sel = _project_rows(p, rows)
+        if not sel:
+            continue
+        if p.detection_mode == "image":
+            repos = {r["repo"] for r in sel}
+        else:  # the image the detection would pick (majority, oldest on ties)
+            det = pick_version([{"metric": {"image": r["image"]}} for r in sel], p.image_version_pattern,
+                               prefer=p.workload_name)
+            repos = {image_repository(det.image)}
+        for r in sel:
+            if r["repo"] in repos:
+                comp = groups[r["group"]]["components"][r["repo"]]
+                comp["project"] = comp["project"] or {"id": p.id, "name": p.name}
+
+
+def _main_chart(name: str, charts: Counter) -> str | None:
+    """The release's own chart: the one named like the release, else the most common."""
+    named = [c for c in charts if (cn := _chart_name(c)) and (name == cn or name.startswith(cn + "-"))]
+    if named:
+        return max(named, key=len)
+    return charts.most_common(1)[0][0] if charts else None
+
+
+async def discover(environment, namespace: str | None = None, projects=()) -> list[dict]:
     """Workloads running in a namespace (or the whole cluster), grouped by Helm release.
 
     Releases come from Helm's storage Secrets (``kube_secret_info``, exported by
     default); a pod belongs to a release by its ``app.kubernetes.io/instance``
     label when kube-state-metrics exports it, else by the release-name prefix.
+    Each distinct image of a group is a ``component`` that can be monitored on its
+    own; ``projects`` (already registered) mark the components they track. A group
+    whose release isn't a Helm release but belongs to one (pods created by an
+    operator, e.g. ``kube-prometheus-stack-prometheus``) gets it as ``parent``.
     """
     extra = _selector(environment.prometheus_extra_selector).removeprefix(", ")
     base = ", ".join(p for p in (f'namespace="{_q(namespace)}"' if namespace else "", extra) if p)
@@ -249,29 +336,78 @@ async def discover(environment, namespace: str | None = None) -> list[dict]:
             releases[key] = max(releases.get(key, 0), int(r.group(2)))
 
     groups: dict[tuple, dict] = {}
+    rows: list[dict] = []
     for s in containers:
         m = s["metric"]
-        ns, pod = m.get("namespace"), m.get("pod")
+        ns, pod, image = m.get("namespace"), m.get("pod"), m.get("image")
         kind, name = owner.get((ns, pod), ("pod", pod))
         lab = pod_labels.get((ns, pod), {})
         release = lab.get("label_app_kubernetes_io_instance") or _release_for(
             name, [r for n, r in releases if n == ns])
-        g = groups.setdefault((ns, release or f"{kind}/{name}"), {
+        key = (ns, release or f"{kind}/{name}")
+        g = groups.setdefault(key, {
             "namespace": ns, "release": release, "helm": (ns, release) in releases,
-            "revision": releases.get((ns, release)), "chart": None, "workloads": {}, "series": [],
+            "revision": releases.get((ns, release)), "chart": None, "parent": None,
+            "workloads": {}, "components": {}, "_charts": Counter(), "_links": set(),
         })
-        g["chart"] = g["chart"] or lab.get("label_helm_sh_chart")
-        w = g["workloads"].setdefault(f"{kind}/{name}", {"kind": kind, "name": name, "containers": {}})
-        w["containers"][m.get("container")] = m.get("image")
-        g["series"].append(s)
+        chart = lab.get("label_helm_sh_chart")
+        w = g["workloads"].setdefault(f"{kind}/{name}", {"kind": kind, "name": name, "chart": chart, "containers": {}})
+        w["chart"] = w["chart"] or chart
+        w["containers"][m.get("container")] = image
+        if chart:
+            g["_charts"][chart] += 1
+        g["_links"].update(v for lbl in _LINK_LABELS if (v := lab.get(lbl)) and v != release)
+        repo = image_repository(image)
+        comp = g["components"].setdefault(repo, {"repository": repo, "containers": [], "series": [], "charts": Counter(),
+                                                 "project": None})
+        ref = {"kind": kind, "workload": name, "container": m.get("container")}
+        if ref not in comp["containers"]:
+            comp["containers"].append(ref)
+        comp["series"].append(s)
+        if chart:
+            comp["charts"][chart] += 1
+        rows.append({**ref, "namespace": ns, "release": release, "image": image, "repo": repo, "group": key})
 
+    _link_projects(groups, rows, projects)
+    known = {(g["namespace"], g["release"]) for g in groups.values() if g["release"]} | set(releases)
     out = []
     for g in groups.values():
-        det = pick_version(g.pop("series"))
-        g.update(image=det.image, version=det.version, images=det.images)
+        name = _base_name({**g, "workloads": list(g["workloads"].values())})
+        g["chart"] = _main_chart(name, g.pop("_charts"))
+        links = sorted(v for v in g.pop("_links") if (g["namespace"], v) in known)
+        if links:
+            g["parent"] = links[0]
+        elif not g["helm"]:  # e.g. pods an operator labels with its own instance name
+            g["parent"] = _release_for(name, [r for n, r in releases if n == g["namespace"] and r != g["release"]])
         g["workloads"] = [{**w, "containers": [{"container": c, "image": i} for c, i in w["containers"].items()]}
                           for w in sorted(g["workloads"].values(), key=lambda w: w["name"])]
-        g["suggestion"] = _suggest(g)
+        comps = []
+        for c in g.pop("components").values():
+            det = pick_version(c.pop("series"))
+            charts = c.pop("charts")
+            comps.append({**c, "image": det.image, "version": det.version, "images": det.images, "pods": sum(det.images.values()),
+                          "chart": next((ch for ch in charts if _names_image(_chart_name(ch) or "", c["repository"])), None)})
+        # Main image: most pods; on ties the one the group is named after, then the oldest version.
+        comps.sort(key=lambda c: (-c["pods"], not _names_image(name, c["repository"]),
+                                  parse_version(image_tag(c["image"])) or parse_version("0.0.0"), c["repository"] or ""))
+        multi, used = len(comps) > 1, set()
+        for i, c in enumerate(comps):
+            c["suggestion"] = sg = _suggest(g, c, multi)
+            if i:
+                sg["name"] = f"{name} ({_basename(c['repository'])})"
+                if sg["name"] in used:
+                    sg["name"] = f"{name} ({c['repository']})"
+            used.add(sg["name"])
+            c.pop("pods")
+        comps[0]["chart"] = comps[0]["chart"] or g["chart"]
+        main = comps[0]
+        g.update(image=main["image"], version=main["version"], images=main["images"], components=comps,
+                 suggestion=main["suggestion"], project=main["project"])
         out.append(g)
-    out.sort(key=lambda g: (g["namespace"] or "", g["release"] is None, g["release"] or g["workloads"][0]["name"]))
+
+    def order(g):
+        family = g["parent"] or g["release"]
+        return (g["namespace"] or "", family is None, family or g["workloads"][0]["name"], g["parent"] is not None,
+                _base_name(g))
+    out.sort(key=order)
     return out

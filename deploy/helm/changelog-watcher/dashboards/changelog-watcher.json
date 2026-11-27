@@ -1,7 +1,7 @@
 {
   "uid": "changelog-watcher",
-  "title": "Changelog Watcher – Atualizações de aplicações",
-  "description": "Versões em uso x versões disponíveis por ambiente (bugfix/minor/major), envelhecimento e divergências.",
+  "title": "Changelog Watcher – Application updates",
+  "description": "Versions in use vs. available versions per environment (bugfix/minor/major), aging and drift.",
   "tags": [
     "changelog-watcher",
     "versions",
@@ -34,7 +34,7 @@
       },
       {
         "name": "environment",
-        "label": "Ambiente",
+        "label": "Environment",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -57,7 +57,7 @@
       },
       {
         "name": "project",
-        "label": "Aplicação",
+        "label": "Application",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -84,7 +84,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Visão geral",
+      "title": "Overview",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -97,8 +97,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "% atualizado",
-      "description": "Fração das implantações (com versão conhecida) que estão na versão mais recente.",
+      "title": "% up to date",
+      "description": "Share of deployments (with a known version) running the latest version.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -169,7 +169,7 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Implantações monitoradas",
+      "title": "Monitored deployments",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -232,8 +232,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Bugfix pendente",
-      "description": "Implantações com versão de bugfix (mesmo major.minor) disponível.",
+      "title": "Bugfix pending",
+      "description": "Deployments with a bugfix version (same major.minor) available.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -299,7 +299,7 @@
     {
       "id": 5,
       "type": "stat",
-      "title": "Minor pendente",
+      "title": "Minor pending",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -366,7 +366,7 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Major pendente",
+      "title": "Major pending",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -433,8 +433,8 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "Libyears",
-      "description": "Soma, em anos, do intervalo entre a versão em uso e a mais recente.",
+      "title": "Average libyears",
+      "description": "Average, per deployment, of the gap in years between the version in use and the latest.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -451,7 +451,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(changelog_watcher_environment_libyears_total{environment=~\"$environment\"})",
+          "expr": "avg(changelog_watcher_app_libyears{environment=~\"$environment\"})",
           "refId": "A",
           "legendFormat": "__auto",
           "range": false,
@@ -473,7 +473,7 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 1
+          "decimals": 2
         },
         "overrides": []
       },
@@ -497,8 +497,8 @@
     {
       "id": 8,
       "type": "stat",
-      "title": "Apps com versões divergentes",
-      "description": "Aplicações rodando versões diferentes entre os ambientes.",
+      "title": "Apps with divergent versions",
+      "description": "Applications running different versions across environments.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -564,12 +564,12 @@
     {
       "id": 9,
       "type": "barchart",
-      "title": "Status por ambiente",
+      "title": "Status by environment",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Maior atualização pendente de cada implantação.",
+      "description": "Largest pending update of each deployment.",
       "gridPos": {
         "x": 0,
         "y": 6,
@@ -627,7 +627,26 @@
               },
               {
                 "id": "displayName",
-                "value": "Atualizado"
+                "value": "Up to date"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tolerated"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "Within tolerance"
               }
             ]
           },
@@ -703,7 +722,7 @@
               },
               {
                 "id": "displayName",
-                "value": "Desconhecido"
+                "value": "Unknown"
               }
             ]
           }
@@ -729,12 +748,12 @@
     {
       "id": 10,
       "type": "barchart",
-      "title": "Há quanto tempo estão desatualizadas",
+      "title": "How long they have been outdated",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Implantações desatualizadas por tempo desde a publicação da primeira versão mais nova.",
+      "description": "Outdated deployments by time since the first newer version was published.",
       "gridPos": {
         "x": 12,
         "y": 6,
@@ -808,7 +827,7 @@
     {
       "id": 11,
       "type": "row",
-      "title": "Envelhecimento do ambiente",
+      "title": "Environment aging",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -821,7 +840,7 @@
     {
       "id": 12,
       "type": "timeseries",
-      "title": "% atualizado ao longo do tempo",
+      "title": "% up to date over time",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -883,8 +902,8 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Libyears acumulados",
-      "description": "Quanto maior, mais antigo está o ambiente.",
+      "title": "Average libyears",
+      "description": "Average libyears per deployment. The higher, the older the environment.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -901,7 +920,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "changelog_watcher_environment_libyears_total{environment=~\"$environment\"}",
+          "expr": "changelog_watcher_environment_libyears_avg{environment=~\"$environment\"}",
           "refId": "A",
           "legendFormat": "{{environment}}",
           "range": true,
@@ -944,7 +963,7 @@
     {
       "id": 14,
       "type": "timeseries",
-      "title": "Implantações desatualizadas por tipo",
+      "title": "Outdated deployments by type",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1005,7 +1024,7 @@
     {
       "id": 15,
       "type": "timeseries",
-      "title": "Atraso médio e máximo (dias)",
+      "title": "Average and maximum delay (days)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1025,7 +1044,7 @@
           },
           "expr": "changelog_watcher_environment_outdated_days_avg{environment=~\"$environment\"}",
           "refId": "A",
-          "legendFormat": "{{environment}} · média",
+          "legendFormat": "{{environment}} · average",
           "range": true,
           "instant": false
         },
@@ -1036,7 +1055,7 @@
           },
           "expr": "changelog_watcher_environment_outdated_days_max{environment=~\"$environment\"}",
           "refId": "B",
-          "legendFormat": "{{environment}} · máximo",
+          "legendFormat": "{{environment}} · maximum",
           "range": true,
           "instant": false
         }
@@ -1077,7 +1096,7 @@
     {
       "id": 16,
       "type": "row",
-      "title": "Versões por aplicação",
+      "title": "Versions by application",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1090,7 +1109,7 @@
     {
       "id": 17,
       "type": "table",
-      "title": "Versões em uso e atualizações disponíveis",
+      "title": "Versions in use and available updates",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1187,18 +1206,18 @@
               "version_source": 11
             },
             "renameByName": {
-              "project": "Aplicação",
-              "environment": "Ambiente",
+              "project": "Application",
+              "environment": "Environment",
               "status": "Status",
-              "current_version": "Atual",
+              "current_version": "Current",
               "latest_patch": "Bugfix",
               "latest_minor": "Minor",
               "latest_major": "Major",
-              "latest_version": "Mais recente",
-              "Value #B": "Atrasada há (dias)",
-              "Value #C": "Versões atrás",
+              "latest_version": "Latest",
+              "Value #B": "Outdated for (days)",
+              "Value #C": "Versions behind",
               "Value #D": "Libyears",
-              "version_source": "Origem"
+              "version_source": "Source"
             }
           }
         },
@@ -1207,7 +1226,7 @@
           "options": {
             "sort": [
               {
-                "field": "Atrasada há (dias)",
+                "field": "Outdated for (days)",
                 "desc": true
               }
             ]
@@ -1239,29 +1258,34 @@
                     "type": "value",
                     "options": {
                       "up_to_date": {
-                        "text": "Atualizado",
+                        "text": "Up to date",
                         "color": "#0ca30c",
                         "index": 0
+                      },
+                      "tolerated": {
+                        "text": "Within tolerance",
+                        "color": "#5794f2",
+                        "index": 1
                       },
                       "patch": {
                         "text": "Bugfix",
                         "color": "#fab219",
-                        "index": 1
+                        "index": 2
                       },
                       "minor": {
                         "text": "Minor",
                         "color": "#ec835a",
-                        "index": 2
+                        "index": 3
                       },
                       "major": {
                         "text": "Major",
                         "color": "#d03b3b",
-                        "index": 3
+                        "index": 4
                       },
                       "unknown": {
-                        "text": "Desconhecido",
+                        "text": "Unknown",
                         "color": "#898781",
-                        "index": 4
+                        "index": 5
                       }
                     }
                   }
@@ -1283,7 +1307,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Atrasada há (dias)"
+              "options": "Outdated for (days)"
             },
             "properties": [
               {
@@ -1336,12 +1360,12 @@
     {
       "id": 18,
       "type": "table",
-      "title": "Comparação de versões entre ambientes",
+      "title": "Version comparison across environments",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Uma coluna por ambiente. Use junto com o painel de divergências.",
+      "description": "One column per environment. Use it with the drift panel.",
       "gridPos": {
         "x": 0,
         "y": 44,
@@ -1376,7 +1400,7 @@
           "id": "organize",
           "options": {
             "renameByName": {
-              "project\\environment": "Aplicação"
+              "project\\environment": "Application"
             }
           }
         }
@@ -1398,7 +1422,7 @@
     {
       "id": 19,
       "type": "table",
-      "title": "Divergências entre pares de ambientes",
+      "title": "Drift between environment pairs",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1439,9 +1463,9 @@
               "container": true
             },
             "renameByName": {
-              "source_environment": "Ambiente A",
-              "target_environment": "Ambiente B",
-              "Value": "Apps diferentes"
+              "source_environment": "Environment A",
+              "target_environment": "Environment B",
+              "Value": "Different apps"
             }
           }
         }
@@ -1452,7 +1476,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Apps diferentes"
+              "options": "Different apps"
             },
             "properties": [
               {
@@ -1489,7 +1513,7 @@
     {
       "id": 20,
       "type": "state-timeline",
-      "title": "Histórico de status por aplicação",
+      "title": "Status history by application",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1520,12 +1544,12 @@
               "type": "value",
               "options": {
                 "-1": {
-                  "text": "Desconhecido",
+                  "text": "Unknown",
                   "color": "#898781",
                   "index": 0
                 },
                 "0": {
-                  "text": "Atualizado",
+                  "text": "Up to date",
                   "color": "#0ca30c",
                   "index": 1
                 },
@@ -1584,7 +1608,7 @@
     {
       "id": 21,
       "type": "row",
-      "title": "Novas versões e saúde da coleta",
+      "title": "End of life (EOL)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1596,8 +1620,9 @@
     },
     {
       "id": 22,
-      "type": "table",
-      "title": "Versões publicadas nos últimos 7 dias",
+      "type": "stat",
+      "title": "EOL reached",
+      "description": "Deployments whose cycle in use is already unsupported (endoflife.date).",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1605,6 +1630,319 @@
       "gridPos": {
         "x": 0,
         "y": 65,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(changelog_watcher_environment_apps_eol{environment=~\"$environment\", status=\"eol\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              },
+              {
+                "value": 1,
+                "color": "#d03b3b"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "showPercentChange": false,
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "EOL soon",
+      "description": "Deployments whose cycle in use loses support within the warning period (EOL_WARNING_DAYS).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(changelog_watcher_environment_apps_eol{environment=~\"$environment\", status=\"soon\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              },
+              {
+                "value": 1,
+                "color": "#ec835a"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "showPercentChange": false,
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "End of life of the cycle in use",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Cycle of each deployment according to endoflife.date and the days until its end of life (negative: already past).",
+      "gridPos": {
+        "x": 4,
+        "y": 65,
+        "w": 20,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "changelog_watcher_app_eol_level{environment=~\"$environment\", project=~\"$project\"}",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "changelog_watcher_app_eol_days_left{environment=~\"$environment\", project=~\"$project\"}",
+          "refId": "B",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "service": true,
+              "endpoint": true,
+              "container": true
+            },
+            "indexByName": {
+              "project": 0,
+              "environment": 1,
+              "product": 2,
+              "cycle": 3,
+              "Value #A": 4,
+              "Value #B": 5
+            },
+            "renameByName": {
+              "project": "Application",
+              "environment": "Environment",
+              "product": "Product",
+              "cycle": "Cycle",
+              "Value #A": "Support",
+              "Value #B": "Days until EOL"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Days until EOL"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Support"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Supported",
+                        "color": "#0ca30c",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "EOL soon",
+                        "color": "#ec835a",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "EOL reached",
+                        "color": "#d03b3b",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Days until EOL"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "row",
+      "title": "New versions and collection health",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 26,
+      "type": "table",
+      "title": "Versions published in the last 7 days",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 74,
         "w": 12,
         "h": 9
       },
@@ -1672,10 +2010,10 @@
               "container": true
             },
             "renameByName": {
-              "project": "Aplicação",
-              "version": "Mais recente",
-              "Value #A": "Novas (7d)",
-              "Value #B": "Publicada em"
+              "project": "Application",
+              "version": "Latest",
+              "Value #A": "New (7d)",
+              "Value #B": "Published at"
             }
           }
         }
@@ -1686,7 +2024,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Publicada em"
+              "options": "Published at"
             },
             "properties": [
               {
@@ -1703,16 +2041,16 @@
       }
     },
     {
-      "id": 23,
+      "id": 27,
       "type": "table",
-      "title": "Falhas de coleta / detecção",
+      "title": "Collection / detection failures",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
-        "y": 65,
+        "y": 74,
         "w": 12,
         "h": 9
       },
@@ -1764,16 +2102,16 @@
               "Value #B": true
             },
             "renameByName": {
-              "project": "Aplicação",
-              "environment": "Ambiente (detecção)",
-              "source_type": "Fonte (releases)"
+              "project": "Application",
+              "environment": "Environment (detection)",
+              "source_type": "Source (releases)"
             }
           }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Nenhuma falha"
+          "noValue": "No failures"
         },
         "overrides": []
       },
@@ -1783,17 +2121,17 @@
       }
     },
     {
-      "id": 24,
+      "id": 28,
       "type": "stat",
-      "title": "Última atualização",
-      "description": "Tempo desde o fim da última atualização.",
+      "title": "Last refresh",
+      "description": "Time since the end of the last refresh.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
-        "y": 74,
+        "y": 83,
         "w": 6,
         "h": 4
       },
@@ -1855,9 +2193,9 @@
       }
     },
     {
-      "id": 25,
+      "id": 29,
       "type": "stat",
-      "title": "Última atualização sem erros",
+      "title": "Last refresh without errors",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1865,7 +2203,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 74,
+        "y": 83,
         "w": 6,
         "h": 4
       },
@@ -1906,7 +2244,7 @@
               "type": "value",
               "options": {
                 "0": {
-                  "text": "Com erros"
+                  "text": "With errors"
                 },
                 "1": {
                   "text": "OK"
@@ -1935,9 +2273,9 @@
       }
     },
     {
-      "id": 26,
+      "id": 30,
       "type": "timeseries",
-      "title": "Duração das atualizações",
+      "title": "Refresh duration",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -1945,7 +2283,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 74,
+        "y": 83,
         "w": 12,
         "h": 4
       },
@@ -1957,7 +2295,7 @@
           },
           "expr": "rate(changelog_watcher_refresh_duration_seconds_sum[1h]) / rate(changelog_watcher_refresh_duration_seconds_count[1h])",
           "refId": "A",
-          "legendFormat": "duração média",
+          "legendFormat": "average duration",
           "range": true,
           "instant": false
         }

@@ -12,5 +12,5 @@ metadata:
   {{- end }}
 data:
   changelog-watcher.json: |-
-{{ .Files.Get "dashboards/changelog-watcher.json" | indent 4 }}
+{{ .Files.Get (ternary "dashboards/changelog-watcher.pt-BR.json" "dashboards/changelog-watcher.json" (eq (include "cw.lang" .) "pt-BR")) | indent 4 }}
 {{- end }}

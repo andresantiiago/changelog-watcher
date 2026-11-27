@@ -14,15 +14,18 @@ def test_dashboard_metrics_exist(client, seeded):
     exposed = set(re.findall(r"^# TYPE (\w+) ", client.get("/metrics").text, re.M))
     exposed |= {f"{m}_sum" for m in exposed} | {f"{m}_count" for m in exposed}
     dash = json.loads(DASH.read_text())
-    used = set()
+    pt = json.loads(DASH.with_name("changelog-watcher.pt-BR.json").read_text())
 
-    def walk(panels):
+    def metrics(panels, acc):
         for p in panels:
-            walk(p.get("panels", []))
+            metrics(p.get("panels", []), acc)
             for t in p.get("targets", []):
-                used.update(re.findall(r"changelog_watcher_\w+", t["expr"]))
+                acc.update(re.findall(r"changelog_watcher_\w+", t["expr"]))
+        return acc
 
-    walk(dash["panels"])
+    used = metrics(dash["panels"], set())
+    assert used == metrics(pt["panels"], set()), "the English and pt-BR dashboards must query the same metrics"
+    assert [p["id"] for p in pt["panels"]] == [p["id"] for p in dash["panels"]]
     assert used, "no metrics found in dashboard"
     missing = used - exposed
     assert not missing, f"dashboard uses metrics not exposed: {missing}"
@@ -39,4 +42,4 @@ def test_example_config_loads(client):
     assert stats == {"environments": 2, "projects": 6, "webhooks": 2}
     projects = {p["name"]: p for p in client.get("/api/projects").json()}
     assert projects["postgres"]["version_scheme"] == "major_patch"
-    assert projects["minha-api"]["deployments"][0]["manual_version"] == "2.3.1"
+    assert projects["my-api"]["deployments"][0]["manual_version"] == "2.3.1"

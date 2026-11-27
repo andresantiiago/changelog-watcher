@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Changelog Watcher tracks releases of a list of apps, compares them with the version running in each environment (manual or detected via Prometheus/kube-state-metrics) and reports what is outdated (UI, weekly webhook report, `/metrics`, Grafana dashboard, Helm chart). The README (in Portuguese) is the user-facing spec: version classification rules, Prometheus detection modes, env vars, metrics table. User-facing strings, error messages and docs are in Portuguese (pt-BR); keep it that way.
+Changelog Watcher tracks releases of a list of apps, compares them with the version running in each environment (manual or detected via Prometheus/kube-state-metrics) and reports what is outdated (UI, weekly webhook report, `/metrics`, Grafana dashboard, Helm chart). The README is the user-facing spec: version classification rules, Prometheus detection modes, env vars, metrics table. It exists in English (`README.md`, default) and Brazilian Portuguese (`README.pt-BR.md`): keep both in sync (same for `docs/screenshots/README*.md`). The app is bilingual too (see **i18n** below).
 
 ## Commands
 
@@ -14,18 +14,18 @@ changelog-watcher report [--send] [--days N]
 
 pytest -q                                                # all tests
 pytest tests/test_versioning.py::test_name -q            # single test
-python deploy/grafana/build_dashboard.py                 # regenerate Grafana dashboard JSON
+python deploy/grafana/build_dashboard.py                 # regenerate Grafana dashboard JSONs (en + pt-BR)
 helm lint deploy/helm/changelog-watcher
 ```
 
-Local kind cluster with a locally built image: see `deploy/helm/values-kind.yaml` (header has the docker build / `kind load` / helm steps) and the README section "Cluster kind local".
+Local kind cluster with a locally built image: see `deploy/helm/values-kind.yaml` (header has the docker build / `kind load` / helm steps) and the README section "Local kind cluster".
 
 ## CI / releases
 
 - **`.github/workflows/ci.yaml`** (every PR, and called by `release.yaml`): pytest (JUnit XML rendered by `.github/scripts/test_summary.py` to the job summary and a sticky PR comment), regenerates the dashboard and fails on `git diff --exit-code deploy/`, then `helm lint` + `helm template` with all optional features enabled.
 - **`.github/workflows/release.yaml`** (push to `main` and `v*-rc*` tags): calls `ci.yaml`, then `version` → `image` → `release`. Image and Helm chart are versioned separately by changed paths since each one's last tag (`PATHS` in `.github/scripts/release_version.py`): image (`changelog_watcher/`, `Dockerfile`, `.dockerignore`, `pyproject.toml`) → tag `vX.Y.Z`, GHCR image, release, updates pyproject `version` + Chart `appVersion`; chart (`deploy/helm/changelog-watcher/`) → tag `chart-vX.Y.Z`, release (not Latest), updates Chart `version`. A new image also bumps the chart (patch if the chart itself didn't change). Docs/tests/CI never release; README/`docs/` changes go into the next release's notes. With no `chart-v*` tag yet, the chart starts from the last `vX.Y.Z`. Copilot CLI (auth via `GH_TOKEN`, prompt inline in the workflow) classifies each component's changes (`changes-<component>.txt` → `copilot-<component>.txt`) major/minor/patch and writes its notes. Per component the version is the max of its declared version (and, for the image, `vX.Y.Z-rcN` tags, `-rcN` stripped) if above its last final tag, else a bump by Copilot's answer, falling back to the component's commit-message rules. It commits a sync of `pyproject.toml` + `Chart.yaml` if needed (`[skip ci]`), then tags, pushes the image to GHCR and creates the GitHub releases. A `vX.Y.Z-rcN` tag publishes only that image tag + a GitHub pre-release, no commit.
 - **Version format**: `vX.Y.Z[-rcN]` for image tags/releases and the chart's `version`/`appVersion`; chart tags/releases are `chart-vX.Y.Z`; `pyproject.toml` stays PEP 440 without `v` (`X.Y.Z`, `X.Y.ZrcN`) and `__version__` reads it from package metadata.
-- Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher.json`; edit `build_dashboard.py` and rerun it.
+- Never hand-edit `deploy/helm/changelog-watcher/dashboards/changelog-watcher*.json`; edit `build_dashboard.py` and rerun it. Panel texts there are written in pt-BR and its `EN` dict translates them (exact strings) into the default English `changelog-watcher.json`; `changelog-watcher.pt-BR.json` is the untranslated build. Helm picks one by `config.language`.
 
 ## Architecture
 
@@ -46,6 +46,7 @@ Key conventions:
 - **DB / migrations**: SQLAlchemy 2.0 models in `models.py`; `db.init_engine` does `create_all` plus `_add_missing_columns`, a forward-only migration that only adds columns. New columns must be nullable or have a scalar default; renames/removals are not supported. SQLite only (`make_engine` rejects other URLs): a file, or `sqlite:///:memory:` (data lost on restart). Helm `persistence.type`: `pvc` renders a StatefulSet with a volumeClaimTemplate, `inMemory` a Deployment; always 1 replica.
 - **Seed** (`seed.py`): optional YAML (`CONFIG_FILE`) loaded at startup and by CLI commands. Accepted fields are derived from the Pydantic `*In` schemas in `schemas.py`, so a new schema field is automatically seedable. Only creates missing records unless `SEED_OVERWRITE=true`.
 - **Environment filters**: in `compute_statuses` (and its callers) `None` means all environments and `[]` means none; but `Webhook.environment_ids == []` means the webhook receives all environments. Don't mix the two.
+- **i18n**: English is the default language, Brazilian Portuguese the other one. Backend user-facing messages (API errors, source/Prometheus errors, report Markdown, webhook chat text, `/api/meta` labels) are written in English and wrapped in `i18n._()`, with the translation in `i18n._PT_BR`; the language comes from `APP_LANGUAGE`, overridden by `app_settings.language` (Settings page), cached in `i18n._current` (`create_app` resets it). The SPA uses `t("English text", {params})` with the catalog in `static/i18n.js`; module-level labels (STATUS, RELATION, EOL) are getters so they translate after `/api/meta` loads; static `index.html` text uses `data-i18n*` attributes. `tests/test_i18n.py` fails on any `_()`/`t()` string missing from its catalog. Logs and metric HELP texts are English only. Metric label values (statuses, age buckets like `>365d`) are language-neutral identifiers and are never translated (dashboards and alerts depend on them).
 - **Settings** come from env vars only (`config.Settings.from_env`, `lru_cache`d `get_settings()`). When adding a setting, also document it in the README table and, if relevant, `deploy/helm/changelog-watcher/values.yaml`.
 
 ## Tests

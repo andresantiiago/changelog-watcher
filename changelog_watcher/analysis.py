@@ -10,10 +10,15 @@ from itertools import combinations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Deployment, Environment, Project, Release, aware
+from .config import get_settings
+from .models import AppSetting, Deployment, Environment, Project, Release, aware
 from .versioning import (
     STATUS_LEVEL,
+    STATUS_MINOR,
     STATUS_ORDER,
+    STATUS_OUTDATED,
+    STATUS_PATCH,
+    STATUS_TOLERATED,
     STATUS_UNKNOWN,
     STATUS_UP_TO_DATE,
     Version,
@@ -26,10 +31,22 @@ AGE_BUCKETS = [
     ("30-90d", 30, 90),
     ("90-180d", 90, 180),
     ("180-365d", 180, 365),
-    (">1 ano", 365, None),
+    (">365d", 365, None),
 ]
 # ponytail: limite fixo; vira setting se algum projeto precisar de outro valor.
 STALE_AFTER = timedelta(days=730)
+
+
+TOLERANCE_KEYS = ("tolerance_days", "tolerance_minors", "tolerance_bugfixes")
+
+
+def global_tolerance(session: Session) -> dict[str, int | None]:
+    """TOLERANCE_* env vars overridden by the Settings page (app_settings, "" = criterion disabled)."""
+    s = get_settings()
+    out = {k: getattr(s, k) for k in TOLERANCE_KEYS}
+    for row in session.scalars(select(AppSetting).where(AppSetting.key.in_(TOLERANCE_KEYS))):
+        out[row.key] = int(row.value) if row.value else None
+    return out
 
 
 def pv(project: Project, text: str | None, use_pattern: bool = False) -> Version | None:
@@ -127,6 +144,14 @@ class DeploymentStatus:
     project_error: str | None = None
     tags: list = field(default_factory=list)
     namespace: str | None = None
+    # End of life of the running version's release cycle (endoflife.date); see eol.deployment_eol.
+    eol_product: str | None = None
+    eol_cycle: str | None = None
+    eol_cycle_latest: str | None = None
+    eol_date: str | None = None
+    eol_days_left: int | None = None
+    eol_status: str | None = None  # ok|soon|eol
+    eol_link: str | None = None  # vendor page of the cycle, else the product page on endoflife.date
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -142,6 +167,7 @@ def deployment_status(
     environment: Environment,
     versions: dict[Version, VersionEntry],
     now: datetime | None = None,
+    tolerance: dict[str, int | None] | None = None,
 ) -> DeploymentStatus:
     now = now or datetime.now(timezone.utc)
     current_raw = deployment.current_version
@@ -194,7 +220,26 @@ def deployment_status(
             st.libyears = round(max((latest_date - cur_entry.published_at).days, 0) / 365.25, 3)
     elif info.status == STATUS_UP_TO_DATE:
         st.libyears = 0.0
+    if _within_tolerance(project, current, info.newer, st, tolerance or {}):
+        st.status = STATUS_TOLERATED  # level keeps the pending update (1 bugfix, 2 minor)
+    from .eol import deployment_eol  # late: eol -> sources -> analysis
+
+    for key, value in deployment_eol(project, current, now).items():
+        setattr(st, key, value)
     return st
+
+
+def _within_tolerance(project: Project, current: Version | None, newer: list[Version], st: DeploymentStatus,
+                      tolerance: dict[str, int | None]) -> bool:
+    """Bugfix/minor behind and inside every enabled limit (the project's own, else the global one)."""
+    if st.status not in (STATUS_PATCH, STATUS_MINOR):
+        return False
+    limits = {k: v if (v := getattr(project, k)) is not None else tolerance.get(k) for k in TOLERANCE_KEYS}
+    if all(v is None for v in limits.values()):
+        return False
+    minors = len({v.minor for v in newer if v.major == current.major and v.minor > current.minor})  # minor lines
+    actual = {"tolerance_days": st.outdated_days, "tolerance_minors": minors, "tolerance_bugfixes": st.patch_behind}
+    return all(limit is None or actual[k] <= limit for k, limit in limits.items())
 
 
 def load_projects(session: Session) -> list[Project]:
@@ -212,12 +257,13 @@ def compute_statuses(
     session: Session, environment_ids: list[int] | None = None, now: datetime | None = None
 ) -> list[DeploymentStatus]:
     out: list[DeploymentStatus] = []
+    tolerance = global_tolerance(session)
     for project in load_projects(session):
         versions = project_versions(project)
         for dep in project.deployments:
             if environment_ids is not None and dep.environment_id not in environment_ids:
                 continue
-            out.append(deployment_status(project, dep, dep.environment, versions, now))
+            out.append(deployment_status(project, dep, dep.environment, versions, now, tolerance))
     return out
 
 
@@ -227,7 +273,7 @@ def summarize(statuses: list[DeploymentStatus]) -> dict:
         counts[st.status] += 1
     total = len(statuses)
     known = total - counts[STATUS_UNKNOWN]
-    outdated = [s for s in statuses if s.status not in (STATUS_UP_TO_DATE, STATUS_UNKNOWN)]
+    outdated = [s for s in statuses if s.status in STATUS_OUTDATED]
     buckets = {label: 0 for label, *_ in AGE_BUCKETS}
     for s in outdated:
         for label, lo, hi in AGE_BUCKETS:
@@ -235,6 +281,7 @@ def summarize(statuses: list[DeploymentStatus]) -> dict:
                 buckets[label] += 1
                 break
     days = [s.outdated_days for s in outdated]
+    ages = [s.libyears for s in statuses if s.libyears is not None]
     return {
         "total": total,
         "known": known,
@@ -244,11 +291,15 @@ def summarize(statuses: list[DeploymentStatus]) -> dict:
         "minor_pending": sum(1 for s in statuses if s.latest_minor),
         "major_pending": sum(1 for s in statuses if s.latest_major),
         "up_to_date_ratio": round(counts[STATUS_UP_TO_DATE] / known, 4) if known else None,
-        "libyears": round(sum(s.libyears or 0 for s in statuses), 3),
+        "libyears": round(sum(ages), 3),
+        # Mean over deployments with a known libyears value; None when none has one.
+        "libyears_avg": round(sum(ages) / len(ages), 3) if ages else None,
         "avg_outdated_days": round(sum(days) / len(days), 1) if days else 0.0,
         "max_outdated_days": max(days) if days else 0.0,
         "versions_behind": sum(s.versions_behind for s in statuses),
         "age_buckets": buckets,
+        "eol_reached": sum(1 for s in statuses if s.eol_status == "eol"),
+        "eol_soon": sum(1 for s in statuses if s.eol_status == "soon"),
     }
 
 
