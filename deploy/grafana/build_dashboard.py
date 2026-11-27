@@ -25,6 +25,7 @@ PROJ = 'project=~"$project"'
 # Status palette – same semantic colors as the web UI.
 STATUS_COLORS = {
     "up_to_date": "#0ca30c",
+    "tolerated": "#5794f2",
     "patch": "#fab219",
     "minor": "#ec835a",
     "major": "#d03b3b",
@@ -32,6 +33,7 @@ STATUS_COLORS = {
 }
 STATUS_TEXT = {
     "up_to_date": "Atualizado",
+    "tolerated": "Dentro da tolerância",
     "patch": "Bugfix",
     "minor": "Minor",
     "major": "Major",
@@ -469,6 +471,7 @@ EN = {
     "Status por ambiente": "Status by environment",
     "Maior atualização pendente de cada implantação.": "Largest pending update of each deployment.",
     "Atualizado": "Up to date",
+    "Dentro da tolerância": "Within tolerance",
     "Desconhecido": "Unknown",
     "Há quanto tempo estão desatualizadas": "How long they have been outdated",
     "Implantações desatualizadas por tempo desde a publicação da primeira versão mais nova.": "Outdated deployments by time since the first newer version was published.",

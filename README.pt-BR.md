@@ -79,7 +79,7 @@ publicadas (pre-releases ignoradas, a menos que habilitado) e calcula:
 | **bugfix** | maior versão com o mesmo `major.minor` | 1.1.7 |
 | **minor** | maior versão com o mesmo `major` e `minor` maior | 1.3.1 |
 | **major** | maior versão com `major` maior | 2.0.0 |
-| **status** | o maior salto disponível: `up_to_date`, `patch`, `minor`, `major` ou `unknown` | `major` |
+| **status** | o maior salto disponível: `up_to_date`, `tolerated`, `patch`, `minor`, `major` ou `unknown` | `major` |
 | **atrasada há** | dias desde a publicação da primeira versão mais nova que a em uso | 200 dias |
 | **libyears** | anos entre a publicação da versão em uso e a da mais recente ([libyear](https://libyear.com)) | 1,1 |
 
@@ -103,6 +103,26 @@ Tags como `v1.2.3`, `release-1.2.3`, `chart-1.2.3` e imagens como
 versão: é contador de build (as tags de 2016 do CoreDNS) e seria lido como major 11. Use **padrão de tag** (regex) para filtrar
 tags de monorepos e **esquema de versão `major.bugfix`** para projetos como o
 PostgreSQL, em que `16.2 → 16.9` é bugfix.
+
+### Tolerância de desatualização
+
+Manter tudo na última versão raramente é viável. Uma implantação atrás só por bugfix ou minor, e
+dentro de **todos** os limites definidos, fica com status `tolerated` ("dentro da tolerância") e
+não é contada como desatualizada (dashboard, relatório, webhooks, métricas de atraso). Um major
+pendente é sempre desatualização. Cada critério é opcional (`off` na variável, ou campo vazio na
+página Configurações, desativa):
+
+| Critério | Comparado com | Variável | Padrão |
+|---|---|---|---|
+| máx. de dias desatualizada | dias desde a primeira versão mais nova | `TOLERANCE_DAYS` | `60` |
+| máx. de minors atrás | linhas minor mais novas no mesmo major (`1.1 → 1.3` = 2) | `TOLERANCE_MINORS` | `1` |
+| máx. de bugfixes atrás | versões de bugfix mais novas no mesmo `major.minor` | `TOLERANCE_BUGFIXES` | `3` |
+
+As variáveis são o padrão, editável na página Configurações (Helm: `config.tolerance`). Cada
+aplicação pode ter seus próprios limites; campo vazio usa o valor global. Sem nenhum critério
+definido a tolerância fica desligada. `app_update_level` mantém a atualização pendente (1 bugfix,
+2 minor), enquanto `app_info{status="tolerated"}` e `environment_apps{status="tolerated"}` marcam as
+toleradas; `environment_up_to_date_ratio` continua contando só `up_to_date`.
 
 ## Fim de suporte (EOL)
 
@@ -422,6 +442,7 @@ recusadas quando o host resolve para loopback ou link-local (metadata da nuvem,
 | `EOL_API_URL` | `https://endoflife.date/api` | API do endoflife.date (ou um espelho) |
 | `EOL_WARNING_DAYS` | `90` | avisa "EOL próximo" quando faltam até N dias |
 | `EOL_AUTO_MATCH` | `true` | sem produto informado, procura pelo nome/repositório da aplicação |
+| `TOLERANCE_DAYS` / `TOLERANCE_MINORS` / `TOLERANCE_BUGFIXES` | `60` / `1` / `3` | [tolerância de desatualização](#tolerância-de-desatualização); `off` desativa o critério; editável na página Configurações |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API, obrigatória (`/healthz` e `/readyz` ficam abertos); sem elas a aplicação não sobe |
 | `AUTH_DISABLED` | `false` | `true` roda sem autenticação (só para testes locais) |
 | `METRICS_TOKEN` | — | bearer token exigido em `/metrics`; vazio = aberto |

@@ -634,6 +634,25 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "tolerated"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794f2"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "Within tolerance"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "patch"
             },
             "properties": [
@@ -1243,25 +1262,30 @@
                         "color": "#0ca30c",
                         "index": 0
                       },
+                      "tolerated": {
+                        "text": "Within tolerance",
+                        "color": "#5794f2",
+                        "index": 1
+                      },
                       "patch": {
                         "text": "Bugfix",
                         "color": "#fab219",
-                        "index": 1
+                        "index": 2
                       },
                       "minor": {
                         "text": "Minor",
                         "color": "#ec835a",
-                        "index": 2
+                        "index": 3
                       },
                       "major": {
                         "text": "Major",
                         "color": "#d03b3b",
-                        "index": 3
+                        "index": 4
                       },
                       "unknown": {
                         "text": "Unknown",
                         "color": "#898781",
-                        "index": 4
+                        "index": 5
                       }
                     }
                   }

@@ -18,7 +18,7 @@ from .config import get_settings
 from .i18n import _
 from .models import Report
 
-STATUS_ICON = {"up_to_date": "✅", "patch": "🟡", "minor": "🟠", "major": "🔴", "unknown": "⚪", "older": "▫️"}
+STATUS_ICON = {"up_to_date": "✅", "tolerated": "🔵", "patch": "🟡", "minor": "🟠", "major": "🔴", "unknown": "⚪", "older": "▫️"}
 
 
 def build_report_data(session: Session, days: int | None = None, environment_ids: list[int] | None = None,
@@ -32,7 +32,7 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
     summaries = summaries_by_environment(statuses, environments)
     releases = recent_releases(session, days=days, now=now)
     outdated = sorted(
-        (s.to_dict() for s in statuses if s.status not in ("up_to_date",)),
+        (s.to_dict() for s in statuses if s.status not in ("up_to_date", "tolerated")),
         key=lambda s: (s["environment"], -s["level"], -s["outdated_days"], s["project"]),
     )
     matrix = version_matrix(statuses)
@@ -101,13 +101,13 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
 
     lines.append("## " + _("Summary by environment"))
     lines.append("")
-    lines.append(_row(_("Environment"), _("Up to date"), _("Apps"), _("With bugfix pending"), _("With minor pending"),
+    lines.append(_row(_("Environment"), _("Up to date"), _("Within tolerance"), _("Apps"), _("With bugfix pending"), _("With minor pending"),
                       _("With major pending"), _("No version"), _("Libyears (average)"), _("Average delay (days)")))
-    lines.append("|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {s['total']} | {s['patch_pending']} | "
+            f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {c['tolerated']} | {s['total']} | {s['patch_pending']} | "
             f"{s['minor_pending']} | {s['major_pending']} | {c['unknown']} | {_libyears(s)} | "
             f"{s['avg_outdated_days']:.0f} |"
         )

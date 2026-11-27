@@ -17,6 +17,13 @@ def _bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _limit(value: str | None, default: int) -> int | None:
+    """Empty = default, "off" = criterion disabled."""
+    if value is None or value.strip() == "":
+        return default
+    return None if value.strip().lower() == "off" else int(value)
+
+
 @dataclass
 class Settings:
     database_url: str = "sqlite:///./data/changelog-watcher.db"
@@ -47,6 +54,10 @@ class Settings:
     eol_api_url: str = "https://endoflife.date/api"
     eol_warning_days: int = 90
     eol_auto_match: bool = True
+    # Outdated tolerance (None = criterion disabled), overridden by the Settings page / per project.
+    tolerance_days: int | None = 60
+    tolerance_minors: int | None = 1
+    tolerance_bugfixes: int | None = 3
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -80,6 +91,9 @@ class Settings:
             eol_api_url=e("EOL_API_URL", cls.eol_api_url).rstrip("/"),
             eol_warning_days=int(e("EOL_WARNING_DAYS") or cls.eol_warning_days),
             eol_auto_match=_bool(e("EOL_AUTO_MATCH"), cls.eol_auto_match),
+            tolerance_days=_limit(e("TOLERANCE_DAYS"), cls.tolerance_days),
+            tolerance_minors=_limit(e("TOLERANCE_MINORS"), cls.tolerance_minors),
+            tolerance_bugfixes=_limit(e("TOLERANCE_BUGFIXES"), cls.tolerance_bugfixes),
         )
 
 

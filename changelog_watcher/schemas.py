@@ -100,6 +100,10 @@ class ProjectIn(BaseModel):
     image_version_pattern: str | None = None
     # endoflife.date product (e.g. "postgresql"); empty = automatic match, "none" = no EOL check.
     eol_product: str | None = Field(default=None, max_length=100)
+    # Outdated tolerance; None = the global value.
+    tolerance_days: int | None = Field(default=None, ge=0)
+    tolerance_minors: int | None = Field(default=None, ge=0)
+    tolerance_bugfixes: int | None = Field(default=None, ge=0)
     # environment_id -> deployment settings. Missing environments are removed
     # when ``deployments`` is sent; ``None`` leaves deployments untouched.
     deployments: dict[int, DeploymentIn] | None = None
