@@ -24,3 +24,5 @@ data/
 .DS_Store
 .impeccable/
 *.sw?
+.coverage
+coverage.xml
