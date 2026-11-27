@@ -41,8 +41,9 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
         {**row, "environments": {k: v for k, v in row["environments"].items() if int(k) in ids}}
         for row in data["drift"]
     ]
-    out["drift"] = [r for r in out["drift"]
-                    if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1]
+    out["drift"] = [
+        r for r in out["drift"] if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1
+    ]
     out["drift_pairs"] = [p for p in data["drift_pairs"] if p["source"] in names and p["target"] in names]
     out["eol"] = [o for o in data.get("eol") or [] if o["environment_id"] in ids]
     return out
@@ -50,16 +51,27 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
 
 def chat_lines(data: dict, max_items: int = 25) -> list[str]:
     """Compact, table-free text used by chat integrations (standard markdown)."""
-    lines = [_("**📦 Update report – {start} → {end}**", start=data["period_start"][:10], end=data["period_end"][:10]), ""]
+    lines = [
+        _("**📦 Update report – {start} → {end}**", start=data["period_start"][:10], end=data["period_end"][:10]),
+        "",
+    ]
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            _("**{env}**: {pct} up to date · {total} apps · pending: ", env=s["environment"],
-              pct=_pct(s["up_to_date_ratio"]), total=s["total"])
+            _(
+                "**{env}**: {pct} up to date · {total} apps · pending: ",
+                env=s["environment"],
+                pct=_pct(s["up_to_date_ratio"]),
+                total=s["total"],
+            )
             + f"🟡 {s['patch_pending']} {_('bugfix')} · 🟠 {s['minor_pending']} minor · 🔴 {s['major_pending']} major"
             + (_(" · 🔵 {n} within tolerance", n=c["tolerated"]) if c.get("tolerated") else "")
             + (_(" · ⚪ {n} without version", n=c["unknown"]) if c["unknown"] else "")
-            + (_(" · {n} libyears on average", n=f"{s['libyears_avg']:.2f}") if s.get("libyears_avg") is not None else "")
+            + (
+                _(" · {n} libyears on average", n=f"{s['libyears_avg']:.2f}")
+                if s.get("libyears_avg") is not None
+                else ""
+            )
         )
     releases = data["new_releases"]
     lines += ["", _("**New versions ({n})**", n=len(releases))]
@@ -84,8 +96,10 @@ def chat_lines(data: dict, max_items: int = 25) -> list[str]:
     if eol:
         lines += ["", _("**End of life (EOL) ({n})**", n=len(eol))]
         for o in eol[:max_items]:
-            lines.append(f"• {EOL_ICON[o['eol_status']]} {o['environment']} · {o['project']} {o['current_version']} "
-                         f"({o['eol_product']} {o['eol_cycle']}): {eol_when(o)}")
+            lines.append(
+                f"• {EOL_ICON[o['eol_status']]} {o['environment']} · {o['project']} {o['current_version']} "
+                f"({o['eol_product']} {o['eol_cycle']}): {eol_when(o)}"
+            )
         if len(eol) > max_items:
             lines.append(_("• … and {n} more", n=len(eol) - max_items))
     if data["drift"]:
@@ -130,22 +144,32 @@ def chat_payloads(kind: str, lines: list[str]) -> list[dict]:
             chunks.append(current)
         return [{"content": c, "allowed_mentions": {"parse": []}} for c in chunks]
     if kind == "teams":
-        body = [{"type": "TextBlock", "text": line or " ", "wrap": True,
-                 **({"weight": "Bolder", "size": "Medium"} if i == 0 else {})}
-                for i, line in enumerate(lines)]
-        return [{
-            "type": "message",
-            "attachments": [{
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "msteams": {"width": "Full"},
-                    "body": body,
-                },
-            }],
-        }]
+        body = [
+            {
+                "type": "TextBlock",
+                "text": line or " ",
+                "wrap": True,
+                **({"weight": "Bolder", "size": "Medium"} if i == 0 else {}),
+            }
+            for i, line in enumerate(lines)
+        ]
+        return [
+            {
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "type": "AdaptiveCard",
+                            "version": "1.4",
+                            "msteams": {"width": "Full"},
+                            "body": body,
+                        },
+                    }
+                ],
+            }
+        ]
     raise ValueError(kind)
 
 

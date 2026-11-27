@@ -28,7 +28,9 @@ log = logging.getLogger(__name__)
 
 REFRESH_TOTAL = Counter("changelog_watcher_refresh_runs", "Refresh runs", ["result"])
 SOURCE_FETCH = Counter("changelog_watcher_source_fetches", "Release source fetches", ["source_type", "result"])
-DETECTIONS = Counter("changelog_watcher_prometheus_detections", "Version detections via Prometheus", ["environment", "result"])
+DETECTIONS = Counter(
+    "changelog_watcher_prometheus_detections", "Version detections via Prometheus", ["environment", "result"]
+)
 REFRESH_DURATION = Histogram(
     "changelog_watcher_refresh_duration_seconds", "Duration of a refresh run", buckets=(1, 5, 15, 30, 60, 120, 300, 600)
 )
@@ -98,7 +100,9 @@ async def refresh_project_releases(project_id: int, client: httpx.AsyncClient) -
             rel.prerelease = item.prerelease
             rel.published_at = item.published_at or rel.published_at
             # only http(s): the UI renders it as a link (javascript: from a crafted Helm index, GitLab...)
-            rel.url = next((u for u in (item.url, rel.url) if u and u.lower().startswith(("https://", "http://"))), None)
+            rel.url = next(
+                (u for u in (item.url, rel.url) if u and u.lower().startswith(("https://", "http://"))), None
+            )
             if item.notes:
                 rel.notes = item.notes
         p.last_error = None
@@ -227,12 +231,19 @@ async def run_refresh(project_ids: list[int] | None = None, detect: bool = True)
                 with session_scope() as s:
                     for r in await send_alerts(s):
                         if not r["ok"]:
-                            STATE.errors.append(_("alerts to {webhook}: {detail}", webhook=r["webhook"], detail=r["detail"]))
+                            STATE.errors.append(
+                                _("alerts to {webhook}: {detail}", webhook=r["webhook"], detail=r["detail"])
+                            )
             except Exception as exc:  # alerts are best effort: never fail the refresh
                 log.exception("alerts failed")
                 STATE.errors.append(_("alerts: {error}", error=exc))
             STATE.success = STATE.projects_failed == 0 and STATE.detections_failed == 0
-            log.info("refresh finished: %s project(s) ok, %s failed, %s new versions", STATE.projects_ok, STATE.projects_failed, STATE.new_releases)
+            log.info(
+                "refresh finished: %s project(s) ok, %s failed, %s new versions",
+                STATE.projects_ok,
+                STATE.projects_failed,
+                STATE.new_releases,
+            )
             REFRESH_TOTAL.labels("ok" if STATE.success else "partial").inc()
         except Exception as exc:
             log.exception("refresh failed")

@@ -73,7 +73,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, hints: list[s
         for _page_n in range(settings.max_release_pages):
             try:
                 url = await _page(client, url, params, project, repo, out)
-            except (SourceError, httpx.HTTPError):
+            except SourceError, httpx.HTTPError:
                 break
             params = None
             if not url:
@@ -87,6 +87,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, hints: list[s
         if v and not _TWO_PARTS.match(name):
             full_lines.add((v.major, v.minor))
     return [
-        r for name, r in out.items()
+        r
+        for name, r in out.items()
         if not ((m := _TWO_PARTS.match(name)) and (int(m.group(1)), int(m.group(2))) in full_lines)
     ]

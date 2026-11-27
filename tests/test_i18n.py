@@ -13,7 +13,7 @@ PLACEHOLDER = re.compile(r"(?<!\$)\{(\w+)\}")  # not ${VAR} examples
 
 def _ui_catalog() -> dict[str, str]:
     text = (STATIC / "i18n.js").read_text()
-    body = text[text.index('"pt-BR": {') + len('"pt-BR": {'):text.index("\n  },")]
+    body = text[text.index('"pt-BR": {') + len('"pt-BR": {') : text.index("\n  },")]
     return json.loads("{" + body.strip().rstrip(",") + "}")
 
 
@@ -88,7 +88,10 @@ def test_switch_language(client, seeded):
 
     assert client.put("/api/settings", json=body | {"language": "fr"}).status_code == 422
     # omitted language: unchanged
-    assert client.put("/api/settings", json={k: v for k, v in body.items() if k != "language"}).json()["language"] == "pt-BR"
+    assert (
+        client.put("/api/settings", json={k: v for k, v in body.items() if k != "language"}).json()["language"]
+        == "pt-BR"
+    )
 
 
 def test_language_env_var(monkeypatch, client):

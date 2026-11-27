@@ -20,7 +20,7 @@ _current: str | None = None
 
 
 def normalize(value: str | None) -> str:
-    """"pt_BR" / "pt" / "PT-br" -> "pt-BR"; unknown values -> English."""
+    """ "pt_BR" / "pt" / "PT-br" -> "pt-BR"; unknown values -> English."""
     lang = _ALIASES.get((value or "").strip().lower())
     if lang is None and value:
         log.warning("unsupported language %r, using %s", value, DEFAULT_LANGUAGE)
@@ -94,8 +94,7 @@ _PT_BR: dict[str, str] = {
     "cross-origin request blocked": "requisição de outra origem bloqueada",
     # schemas
     "invalid regex: {error}": "regex inválida: {error}",
-    "invalid product: use the endoflife.date identifier, e.g. postgresql":
-        "produto inválido: use o identificador do endoflife.date, ex: postgresql",
+    "invalid product: use the endoflife.date identifier, e.g. postgresql": "produto inválido: use o identificador do endoflife.date, ex: postgresql",
     # refresh
     "unexpected error: {error}": "erro inesperado: {error}",
     "general failure: {error}": "falha geral: {error}",
@@ -130,14 +129,12 @@ _PT_BR: dict[str, str] = {
     "Prometheus detection disabled for this application": "detecção via Prometheus desabilitada para esta aplicação",
     "failed to query Prometheus: {error}": "falha ao consultar Prometheus: {error}",
     "Prometheus answered HTTP {status}": "Prometheus respondeu HTTP {status}",
-    "invalid response: not the Prometheus API (check the URL)":
-        "resposta inválida: não é a API do Prometheus (confira a URL)",
+    "invalid response: not the Prometheus API (check the URL)": "resposta inválida: não é a API do Prometheus (confira a URL)",
     "query error: {error}": "erro na consulta: {error}",
     "no series found for: {query}": "nenhuma série encontrada para: {query}",
     "could not extract a version from image '{image}'": "não foi possível extrair versão da imagem '{image}'",
     # eol
-    "unexpected response from endoflife.date (product list)":
-        "resposta inesperada do endoflife.date (lista de produtos)",
+    "unexpected response from endoflife.date (product list)": "resposta inesperada do endoflife.date (lista de produtos)",
     "invalid product: {product}": "produto inválido: {product}",
     "unexpected response from endoflife.date for {product}": "resposta inesperada do endoflife.date para {product}",
     "EOL: endoflife.date product list: {error}": "EOL: lista de produtos do endoflife.date: {error}",

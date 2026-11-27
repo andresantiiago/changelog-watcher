@@ -191,8 +191,9 @@ async def discover_environment(env_id: int, namespace: str | None = None, db: Se
 async def suggest_source(name: str | None = None, image: str | None = None, chart: str | None = None):
     """Likely release sources for an app (image label, Artifact Hub, Docker Hub, GitHub search)."""
     s = get_settings()
-    async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
-                                 headers={"User-Agent": "changelog-watcher"}) as client:
+    async with safehttp.client(
+        timeout=s.http_timeout, follow_redirects=True, headers={"User-Agent": "changelog-watcher"}
+    ) as client:
         return {"candidates": await suggest_sources(client, s, name=name, image=image, chart=chart)}
 
 
@@ -202,12 +203,18 @@ async def eol_products(project_id: int | None = None, db: Session = Depends(get_
     s = get_settings()
     if not s.eol_enabled:
         return {"enabled": False, "products": [], "suggested": None, "error": None}
-    async with safehttp.client(timeout=s.http_timeout, follow_redirects=True,
-                                 headers={"User-Agent": "changelog-watcher"}) as client:
+    async with safehttp.client(
+        timeout=s.http_timeout, follow_redirects=True, headers={"User-Agent": "changelog-watcher"}
+    ) as client:
         try:
             products = await eol.fetch_products(client, s)
         except (SourceError, httpx.HTTPError, ValueError) as exc:
-            return {"enabled": True, "products": [], "suggested": None, "error": _("endoflife.date unavailable: {error}", error=exc)}
+            return {
+                "enabled": True,
+                "products": [],
+                "suggested": None,
+                "error": _("endoflife.date unavailable: {error}", error=exc),
+            }
     suggested = None
     if project_id is not None:
         suggested = eol.auto_match(_get(db, Project, project_id), products)
@@ -311,8 +318,12 @@ def project_releases(project_id: int, limit: int = 100, db: Session = Depends(ge
 
 
 @router.get("/projects/{project_id}/changelog")
-def project_changelog(project_id: int, from_version: str | None = Query(None, alias="from"),
-                      to_version: str | None = Query(None, alias="to"), db: Session = Depends(get_db)):
+def project_changelog(
+    project_id: int,
+    from_version: str | None = Query(None, alias="from"),
+    to_version: str | None = Query(None, alias="to"),
+    db: Session = Depends(get_db),
+):
     project = _get(db, Project, project_id)
     return changelog_between(project, from_version, to_version)
 
@@ -322,8 +333,9 @@ async def preview_detection(project_id: int, environment_id: int, db: Session = 
     """Run the Prometheus detection once without saving (used by the UI 'testar' button)."""
     project = _get(db, Project, project_id)
     env = _get(db, Environment, environment_id)
-    dep = db.scalar(select(Deployment).where(Deployment.project_id == project_id,
-                                             Deployment.environment_id == environment_id))
+    dep = db.scalar(
+        select(Deployment).where(Deployment.project_id == project_id, Deployment.environment_id == environment_id)
+    )
     try:
         det = await prom.detect(project, dep, env)
         return {"ok": True, "query": det.query, "image": det.image, "version": det.version, "images": det.images}
@@ -343,7 +355,9 @@ def status(environment_id: list[int] | None = Query(None), db: Session = Depends
 
 
 @router.get("/dashboard")
-def dashboard(environment_id: list[int] | None = Query(None), namespace: str | None = None, db: Session = Depends(get_db)):
+def dashboard(
+    environment_id: list[int] | None = Query(None), namespace: str | None = None, db: Session = Depends(get_db)
+):
     envs = [e for e in load_environments(db) if not environment_id or e.id in environment_id]
     statuses = compute_statuses(db, [e.id for e in envs])
     namespaces = sorted({st.namespace for st in statuses if st.namespace})
@@ -360,10 +374,13 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
         "overall": overall,
         "environments": summaries_by_environment(statuses, envs),
         "most_outdated": [s.to_dict() for s in most_outdated],
-        "eol": [s.to_dict() for s in sorted(
-            (s for s in statuses if s.eol_status in ("eol", "soon")),
-            key=lambda s: (s.eol_status != "eol", s.eol_days_left if s.eol_days_left is not None else -10**6),
-        )[:15]],
+        "eol": [
+            s.to_dict()
+            for s in sorted(
+                (s for s in statuses if s.eol_status in ("eol", "soon")),
+                key=lambda s: (s.eol_status != "eol", s.eol_days_left if s.eol_days_left is not None else -(10**6)),
+            )[:15]
+        ],
         "drift_pairs": drift_pairs(statuses, envs),
         "drift_count": sum(1 for r in version_matrix(statuses) if r["drift"]),
         "projects": counts_projects,
@@ -379,8 +396,12 @@ def history(days: int = 90, environment_id: list[int] | None = Query(None), db: 
         stmt = stmt.where(Snapshot.environment_id.in_(environment_id))
     out = []
     for snap, env_name in db.execute(stmt.order_by(Snapshot.day)):
-        row = {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
-               **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
+        row = {
+            "environment_id": snap.environment_id,
+            "environment": env_name,
+            "day": snap.day.isoformat(),
+            **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS},
+        }
         if row["libyears_avg"] is None and snap.libyears:
             # Snapshots from before libyears_avg existed: approximate it from the sum.
             known = (snap.total or 0) - (snap.unknown or 0)
@@ -430,8 +451,11 @@ def refresh_status():
 # ---------------------------------------------------------------- reports
 def _report_summary(r: Report) -> dict:
     return {
-        "id": r.id, "created_at": _iso(r.created_at), "trigger": r.trigger,
-        "period_start": r.period_start.isoformat(), "period_end": r.period_end.isoformat(),
+        "id": r.id,
+        "created_at": _iso(r.created_at),
+        "trigger": r.trigger,
+        "period_start": r.period_start.isoformat(),
+        "period_end": r.period_end.isoformat(),
         "delivery": r.delivery,
         "new_releases": len(r.data.get("new_releases", [])),
         "outdated": sum(1 for o in r.data.get("outdated", []) if o["status"] != "unknown"),
@@ -452,8 +476,11 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
 @router.get("/reports/{report_id}/markdown")
 def get_report_markdown(report_id: int, db: Session = Depends(get_db)):
     r = _get(db, Report, report_id)
-    return Response(r.markdown, media_type="text/markdown; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="relatorio-{r.id}.md"'})
+    return Response(
+        r.markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="relatorio-{r.id}.md"'},
+    )
 
 
 @router.post("/reports", status_code=201)
@@ -548,8 +575,14 @@ class SettingsIn(BaseModel):
 
 
 def _settings_out(db: Session) -> dict:
-    return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs(),
-            "language": i18n.get_language(), "languages": i18n.LANGUAGES, **global_tolerance(db)}
+    return {
+        **effective_schedule(),
+        "timezone": get_settings().timezone,
+        "next_runs": next_runs(),
+        "language": i18n.get_language(),
+        "languages": i18n.LANGUAGES,
+        **global_tolerance(db),
+    }
 
 
 @router.get("/settings")
@@ -569,8 +602,11 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
         if body.language not in i18n.LANGUAGES:
             raise HTTPException(422, _("unsupported language: {value}", value=body.language))
         values.append(("language", body.language))
-    values += [(k, "" if getattr(body, k) is None else str(getattr(body, k)))
-               for k in TOLERANCE_KEYS if k in body.model_fields_set]
+    values += [
+        (k, "" if getattr(body, k) is None else str(getattr(body, k)))
+        for k in TOLERANCE_KEYS
+        if k in body.model_fields_set
+    ]
     for key, value in values:
         row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
         row.value = value

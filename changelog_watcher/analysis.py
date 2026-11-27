@@ -51,8 +51,9 @@ def global_tolerance(session: Session) -> dict[str, int | None]:
 
 def pv(project: Project, text: str | None, use_pattern: bool = False) -> Version | None:
     """Parse a version following the project's scheme (and tag pattern for tags)."""
-    return parse_version(text, project.tag_pattern if use_pattern else None,
-                         two_part=project.version_scheme == "major_patch")
+    return parse_version(
+        text, project.tag_pattern if use_pattern else None, two_part=project.version_scheme == "major_patch"
+    )
 
 
 @dataclass
@@ -81,7 +82,9 @@ def project_versions(project: Project, releases: list[Release] | None = None) ->
         # Prefer the entry with notes, then the oldest publication date.
         a, b = prev.release, rel
         if (not a.notes and b.notes) or (
-            bool(a.notes) == bool(b.notes) and b.published_at and (not a.published_at or aware(b.published_at) < aware(a.published_at))
+            bool(a.notes) == bool(b.notes)
+            and b.published_at
+            and (not a.published_at or aware(b.published_at) < aware(a.published_at))
         ):
             out[v] = VersionEntry(v, rel)
     return _drop_stale(out)
@@ -229,8 +232,13 @@ def deployment_status(
     return st
 
 
-def _within_tolerance(project: Project, current: Version | None, newer: list[Version], st: DeploymentStatus,
-                      tolerance: dict[str, int | None]) -> bool:
+def _within_tolerance(
+    project: Project,
+    current: Version | None,
+    newer: list[Version],
+    st: DeploymentStatus,
+    tolerance: dict[str, int | None],
+) -> bool:
     """Bugfix/minor behind and inside every enabled limit (the project's own, else the global one)."""
     if st.status not in (STATUS_PATCH, STATUS_MINOR):
         return False
@@ -243,8 +251,10 @@ def _within_tolerance(project: Project, current: Version | None, newer: list[Ver
 
 
 def load_projects(session: Session) -> list[Project]:
-    stmt = select(Project).where(Project.enabled.is_(True)).options(
-        selectinload(Project.releases), selectinload(Project.deployments).selectinload(Deployment.environment)
+    stmt = (
+        select(Project)
+        .where(Project.enabled.is_(True))
+        .options(selectinload(Project.releases), selectinload(Project.deployments).selectinload(Deployment.environment))
     )
     return list(session.scalars(stmt.order_by(Project.name)))
 
@@ -319,7 +329,12 @@ def version_matrix(statuses: list[DeploymentStatus]) -> list[dict]:
     for st in statuses:
         row = by_project.setdefault(
             st.project_id,
-            {"project_id": st.project_id, "project": st.project, "latest_version": st.latest_version, "environments": {}},
+            {
+                "project_id": st.project_id,
+                "project": st.project,
+                "latest_version": st.latest_version,
+                "environments": {},
+            },
         )
         row["environments"][str(st.environment_id)] = {
             "version": st.current_version,
@@ -332,9 +347,7 @@ def version_matrix(statuses: list[DeploymentStatus]) -> list[dict]:
     return rows
 
 
-def compare_environments(
-    session: Session, source_id: int, target_id: int, only_differences: bool = False
-) -> dict:
+def compare_environments(session: Session, source_id: int, target_id: int, only_differences: bool = False) -> dict:
     rows = []
     for project in load_projects(session):
         versions = project_versions(project)
@@ -363,8 +376,12 @@ def compare_environments(
             between_versions = sorted((v for v in versions if lo < v <= hi), reverse=True)
             between = len(between_versions)
             notes = [
-                {"version": str(v), "tag": versions[v].release.tag, "url": versions[v].release.url,
-                 "published_at": _iso(versions[v].published_at)}
+                {
+                    "version": str(v),
+                    "tag": versions[v].release.tag,
+                    "url": versions[v].release.url,
+                    "published_at": _iso(versions[v].published_at),
+                }
                 for v in between_versions
             ]
         if only_differences and relation == "same":

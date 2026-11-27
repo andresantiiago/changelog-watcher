@@ -47,9 +47,7 @@ class Environment(Base):
     prometheus_extra_selector: Mapped[str | None] = mapped_column(String(500), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    deployments: Mapped[list[Deployment]] = relationship(
-        back_populates="environment", cascade="all, delete-orphan"
-    )
+    deployments: Mapped[list[Deployment]] = relationship(back_populates="environment", cascade="all, delete-orphan")
 
 
 class Project(Base):
@@ -63,8 +61,12 @@ class Project(Base):
 
     # Where releases / changelog come from.
     source_type: Mapped[str] = mapped_column(String(40), default="github_releases")
-    repository: Mapped[str] = mapped_column(String(500))  # owner/repo, gitlab path, helm repo URL, docker image, changelog URL
-    source_url: Mapped[str | None] = mapped_column(String(500), default=None)  # custom API base (GHE / self-hosted GitLab)
+    repository: Mapped[str] = mapped_column(
+        String(500)
+    )  # owner/repo, gitlab path, helm repo URL, docker image, changelog URL
+    source_url: Mapped[str | None] = mapped_column(
+        String(500), default=None
+    )  # custom API base (GHE / self-hosted GitLab)
     chart_name: Mapped[str | None] = mapped_column(String(200), default=None)  # helm_index
     use_app_version: Mapped[bool] = mapped_column(Boolean, default=False)  # helm_index: compare appVersion
     tag_pattern: Mapped[str | None] = mapped_column(String(300), default=None)
@@ -97,12 +99,8 @@ class Project(Base):
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    releases: Mapped[list[Release]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
-    deployments: Mapped[list[Deployment]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
+    releases: Mapped[list[Release]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    deployments: Mapped[list[Deployment]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
 class Release(Base):
@@ -179,8 +177,21 @@ class Snapshot(Base):
 
 
 # Summary metrics stored per snapshot (the keys of analysis.summarize / its "counts").
-SNAPSHOT_FIELDS = ("total", "up_to_date", "tolerated", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
-                   "libyears_avg", "avg_outdated_days", "max_outdated_days", "versions_behind")
+SNAPSHOT_FIELDS = (
+    "total",
+    "up_to_date",
+    "tolerated",
+    "patch",
+    "minor",
+    "major",
+    "unknown",
+    "up_to_date_ratio",
+    "libyears",
+    "libyears_avg",
+    "avg_outdated_days",
+    "max_outdated_days",
+    "versions_behind",
+)
 
 
 class Webhook(Base):

@@ -26,8 +26,6 @@ VersionSource = Literal["manual", "prometheus"]
 WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
 
 
-
-
 def _check_regex(value: str | None) -> str | None:
     if value:
         try:

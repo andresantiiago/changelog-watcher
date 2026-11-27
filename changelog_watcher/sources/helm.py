@@ -38,7 +38,9 @@ async def fetch_index(project, client: httpx.AsyncClient, settings) -> list[Rele
             published_at=created,
             notes=entry.get("description") or "",
             url=(entry.get("urls") or [None])[0],
-            prerelease=bool(entry.get("annotations", {}) and entry["annotations"].get("artifacthub.io/prerelease") == "true"),
+            prerelease=bool(
+                entry.get("annotations", {}) and entry["annotations"].get("artifacthub.io/prerelease") == "true"
+            ),
         )
         # Several chart versions may ship the same appVersion: keep the oldest date.
         prev = seen.get(version)

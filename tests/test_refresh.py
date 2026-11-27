@@ -24,4 +24,5 @@ def test_deleted_project_is_skipped(client):
     async def go():
         async with httpx.AsyncClient() as c:
             return await refresh_project_releases(999, c)
+
     assert asyncio.run(go()) == 0

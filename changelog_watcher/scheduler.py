@@ -47,13 +47,28 @@ def _schedule_jobs() -> None:
         if _scheduler.get_job(job_id):
             _scheduler.remove_job(job_id)
     if sch["refresh_interval_minutes"] > 0:
-        _scheduler.add_job(run_refresh, IntervalTrigger(minutes=sch["refresh_interval_minutes"]),
-                           id="refresh", max_instances=1, coalesce=True)
+        _scheduler.add_job(
+            run_refresh,
+            IntervalTrigger(minutes=sch["refresh_interval_minutes"]),
+            id="refresh",
+            max_instances=1,
+            coalesce=True,
+        )
     if sch["report_cron"]:
-        _scheduler.add_job(scheduled_report, CronTrigger.from_crontab(sch["report_cron"], timezone=settings.timezone),
-                           id="weekly_report", max_instances=1, coalesce=True, misfire_grace_time=3600)
-    log.info("scheduler configured (refresh every %s min, report '%s' %s)",
-             sch["refresh_interval_minutes"], sch["report_cron"], settings.timezone)
+        _scheduler.add_job(
+            scheduled_report,
+            CronTrigger.from_crontab(sch["report_cron"], timezone=settings.timezone),
+            id="weekly_report",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+    log.info(
+        "scheduler configured (refresh every %s min, report '%s' %s)",
+        sch["refresh_interval_minutes"],
+        sch["report_cron"],
+        settings.timezone,
+    )
 
 
 def start_scheduler() -> None:

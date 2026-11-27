@@ -44,8 +44,11 @@ def find_alerts(session: Session, webhook: Webhook, statuses=None) -> list[dict]
         if webhook.alert_major and st.major_behind and st.latest_major:
             hits.append(("major", st.latest_major))
         if webhook.alert_security and current:
-            fixes = [v for v, e in versions.items()
-                     if v > current and SECURITY_RE.search(f"{e.release.title or ''}\n{e.release.notes or ''}")]
+            fixes = [
+                v
+                for v, e in versions.items()
+                if v > current and SECURITY_RE.search(f"{e.release.title or ''}\n{e.release.notes or ''}")
+            ]
             if fixes:
                 hits.append(("security", str(max(fixes))))
         days = webhook.alert_overdue_days
@@ -53,10 +56,19 @@ def find_alerts(session: Session, webhook: Webhook, statuses=None) -> list[dict]
             hits.append(("overdue", st.latest_version))
         for rule, version in hits:
             entry = versions.get(pv(project, version))
-            out.append({"rule": rule, "project_id": st.project_id, "project": st.project,
-                        "environment_id": st.environment_id, "environment": st.environment,
-                        "current_version": st.current_version, "version": version,
-                        "url": entry.release.url if entry else None, "days": round(st.outdated_days)})
+            out.append(
+                {
+                    "rule": rule,
+                    "project_id": st.project_id,
+                    "project": st.project,
+                    "environment_id": st.environment_id,
+                    "environment": st.environment,
+                    "current_version": st.current_version,
+                    "version": version,
+                    "url": entry.release.url if entry else None,
+                    "days": round(st.outdated_days),
+                }
+            )
     return out
 
 
@@ -69,8 +81,10 @@ def alert_lines(alerts: list[dict]) -> list[str]:
             "security": _("release mentions a security fix"),
             "overdue": _("outdated for {n} days", n=a.get("days")),
         }[a["rule"]]
-        lines.append(f"• {ICONS[a['rule']]} {a['environment']} · {a['project']} "
-                     f"{a['current_version'] or '?'} → {version}: {reason}")
+        lines.append(
+            f"• {ICONS[a['rule']]} {a['environment']} · {a['project']} "
+            f"{a['current_version'] or '?'} → {version}: {reason}"
+        )
     if url := get_settings().public_url:
         lines += ["", f"🔗 {url}"]
     return lines
@@ -82,18 +96,28 @@ def _key(a: dict) -> tuple:
 
 async def send_alerts(session: Session) -> list[dict]:
     """Evaluate every enabled webhook with alert rules and deliver what is new. Returns delivery results."""
-    hooks = list(session.scalars(select(Webhook).where(
-        Webhook.enabled.is_(True),
-        or_(Webhook.alert_major.is_(True), Webhook.alert_security.is_(True), Webhook.alert_overdue_days.is_not(None)),
-    )))
+    hooks = list(
+        session.scalars(
+            select(Webhook).where(
+                Webhook.enabled.is_(True),
+                or_(
+                    Webhook.alert_major.is_(True),
+                    Webhook.alert_security.is_(True),
+                    Webhook.alert_overdue_days.is_not(None),
+                ),
+            )
+        )
+    )
     if not hooks:
         return []
     statuses = compute_statuses(session)
     results = []
     async with safehttp.client(timeout=get_settings().http_timeout) as client:
         for wh in hooks:
-            sent = {(r.project_id, r.environment_id, r.rule, r.version)
-                    for r in session.scalars(select(AlertSent).where(AlertSent.webhook_id == wh.id))}
+            sent = {
+                (r.project_id, r.environment_id, r.rule, r.version)
+                for r in session.scalars(select(AlertSent).where(AlertSent.webhook_id == wh.id))
+            }
             alerts = [a for a in find_alerts(session, wh, statuses) if _key(a) not in sent]
             if not alerts:
                 continue
@@ -102,14 +126,25 @@ async def send_alerts(session: Session) -> list[dict]:
                 result = {"webhook": wh.name, "ok": False, "detail": _("empty URL")}
             else:
                 lines = alert_lines(alerts)
-                payloads = (chat_payloads(wh.kind, lines) if wh.kind in CHAT_KINDS else
-                            [{"event": "changelog_watcher.alert", "markdown": "\n".join(lines), "alerts": alerts}])
+                payloads = (
+                    chat_payloads(wh.kind, lines)
+                    if wh.kind in CHAT_KINDS
+                    else [{"event": "changelog_watcher.alert", "markdown": "\n".join(lines), "alerts": alerts}]
+                )
                 result = await post_payloads(wh.name, url, payloads, client)
             record_status(wh, result, _(" (alerts)"))
             results.append(result)
             if result["ok"]:
-                session.add_all(AlertSent(webhook_id=wh.id, project_id=a["project_id"], environment_id=a["environment_id"],
-                                          rule=a["rule"], version=a["version"]) for a in alerts)
+                session.add_all(
+                    AlertSent(
+                        webhook_id=wh.id,
+                        project_id=a["project_id"],
+                        environment_id=a["environment_id"],
+                        rule=a["rule"],
+                        version=a["version"],
+                    )
+                    for a in alerts
+                )
             else:
                 log.warning("alert webhook %s failed: %s", wh.name, result.get("detail"))
     return results
