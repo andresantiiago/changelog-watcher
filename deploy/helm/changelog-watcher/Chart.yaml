@@ -3,5 +3,5 @@ name: changelog-watcher
 description: Watches releases/changelogs, compares them with the versions deployed in each environment and builds reports, metrics and a dashboard.
 type: application
 version: v1.1.0
-appVersion: "v2.0.0"
+appVersion: "v1.1.0"
 keywords: [releases, changelog, versions, prometheus, grafana]
