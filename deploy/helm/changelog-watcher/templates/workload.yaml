@@ -81,6 +81,12 @@ spec:
               value: {{ .Values.config.eol.warningDays | quote }}
             - name: EOL_AUTO_MATCH
               value: {{ .Values.config.eol.autoMatch | quote }}
+            - name: TOLERANCE_DAYS
+              value: {{ .Values.config.tolerance.days | quote }}
+            - name: TOLERANCE_MINORS
+              value: {{ .Values.config.tolerance.minors | quote }}
+            - name: TOLERANCE_BUGFIXES
+              value: {{ .Values.config.tolerance.bugfixes | quote }}
             - name: SEED_OVERWRITE
               value: {{ .Values.config.seedOverwrite | quote }}
             {{- if include "cw.hasSeed" . }}

@@ -89,6 +89,11 @@ class Project(Base):
     eol_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     eol_error: Mapped[str | None] = mapped_column(Text, default=None)
 
+    # Outdated tolerance; None = use the global value (Settings page / TOLERANCE_* env vars).
+    tolerance_days: Mapped[int | None] = mapped_column(Integer, default=None)
+    tolerance_minors: Mapped[int | None] = mapped_column(Integer, default=None)
+    tolerance_bugfixes: Mapped[int | None] = mapped_column(Integer, default=None)
+
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -160,6 +165,7 @@ class Snapshot(Base):
     day: Mapped[date] = mapped_column(Date, index=True)
     total: Mapped[int] = mapped_column(Integer, default=0)
     up_to_date: Mapped[int] = mapped_column(Integer, default=0)
+    tolerated: Mapped[int] = mapped_column(Integer, default=0)
     patch: Mapped[int] = mapped_column(Integer, default=0)
     minor: Mapped[int] = mapped_column(Integer, default=0)
     major: Mapped[int] = mapped_column(Integer, default=0)
@@ -174,7 +180,7 @@ class Snapshot(Base):
 
 
 # Summary metrics stored per snapshot (the keys of analysis.summarize / its "counts").
-SNAPSHOT_FIELDS = ("total", "up_to_date", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
+SNAPSHOT_FIELDS = ("total", "up_to_date", "tolerated", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
                    "libyears_avg", "avg_outdated_days", "max_outdated_days", "versions_behind")
 
 

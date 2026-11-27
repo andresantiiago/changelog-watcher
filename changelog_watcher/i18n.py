@@ -203,6 +203,8 @@ _PT_BR: dict[str, str] = {
     "**📦 Update report – {start} → {end}**": "**📦 Relatório de atualizações – {start} → {end}**",
     "**{env}**: {pct} up to date · {total} apps · pending: ": "**{env}**: {pct} atualizado · {total} apps · pendentes: ",
     " · ⚪ {n} without version": " · ⚪ {n} sem versão",
+    " · 🔵 {n} within tolerance": " · 🔵 {n} dentro da tolerância",
+    "Within tolerance": "Dentro da tolerância",
     " · {n} libyears on average": " · {n} libyears em média",
     "**New versions ({n})**": "**Novas versões ({n})**",
     "• … and {n} more": "• … e mais {n}",

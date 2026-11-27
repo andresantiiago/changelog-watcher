@@ -15,11 +15,13 @@ from . import eol, i18n, logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
+    TOLERANCE_KEYS,
     _iso,
     changelog_between,
     compare_environments,
     compute_statuses,
     drift_pairs,
+    global_tolerance,
     load_environments,
     project_versions,
     recent_releases,
@@ -61,6 +63,7 @@ from .schemas import (
 )
 from .sources import SOURCE_TYPES, SourceError
 from .suggest import suggest_sources
+from .versioning import STATUS_OUTDATED
 from .webhooks import WEBHOOK_KINDS, deliver_report, record_status, send_webhook
 
 router = APIRouter(prefix="/api")
@@ -90,7 +93,7 @@ def _commit(session: Session):
 
 # ------------------------------------------------------------------- meta
 @router.get("/meta")
-def meta():
+def meta(db: Session = Depends(get_db)):
     s = get_settings()
     sch = effective_schedule()
     return {
@@ -108,6 +111,7 @@ def meta():
         },
         "github_token": bool(s.github_token),
         "eol": {"enabled": s.eol_enabled, "warning_days": s.eol_warning_days, "auto_match": s.eol_auto_match},
+        "tolerance": global_tolerance(db),
         "public_url": s.public_url,
     }
 
@@ -348,7 +352,7 @@ def dashboard(environment_id: list[int] | None = Query(None), namespace: str | N
         statuses = [st for st in statuses if st.namespace == namespace]
     overall = summarize(statuses)
     most_outdated = sorted(
-        (s for s in statuses if s.status not in ("up_to_date", "unknown")),
+        (s for s in statuses if s.status in STATUS_OUTDATED),
         key=lambda s: (-s.outdated_days, -s.level),
     )[:15]
     counts_projects = db.scalar(select(func.count()).select_from(Project))
@@ -538,16 +542,20 @@ class SettingsIn(BaseModel):
     # upper bound: an overflowing interval is saved, then breaks the scheduler on every startup
     refresh_interval_minutes: int = Field(ge=0, le=1_000_000)
     language: str | None = None  # omitted: unchanged
+    # Outdated tolerance: null disables the criterion; omitted: unchanged.
+    tolerance_days: int | None = Field(None, ge=0)
+    tolerance_minors: int | None = Field(None, ge=0)
+    tolerance_bugfixes: int | None = Field(None, ge=0)
 
 
-def _settings_out() -> dict:
+def _settings_out(db: Session) -> dict:
     return {**effective_schedule(), "timezone": get_settings().timezone, "next_runs": next_runs(),
-            "language": i18n.get_language(), "languages": i18n.LANGUAGES}
+            "language": i18n.get_language(), "languages": i18n.LANGUAGES, **global_tolerance(db)}
 
 
 @router.get("/settings")
-def get_app_settings():
-    return _settings_out()
+def get_app_settings(db: Session = Depends(get_db)):
+    return _settings_out(db)
 
 
 @router.put("/settings")
@@ -562,6 +570,8 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
         if body.language not in i18n.LANGUAGES:
             raise HTTPException(422, _("unsupported language: {value}", value=body.language))
         values.append(("language", body.language))
+    values += [(k, "" if getattr(body, k) is None else str(getattr(body, k)))
+               for k in TOLERANCE_KEYS if k in body.model_fields_set]
     for key, value in values:
         row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
         row.value = value
@@ -570,7 +580,7 @@ def update_app_settings(body: SettingsIn, db: Session = Depends(get_db)):
     if body.language is not None:
         i18n.set_language(body.language)
     reschedule()
-    return _settings_out()
+    return _settings_out(db)
 
 
 # ------------------------------------------------------------------- logs

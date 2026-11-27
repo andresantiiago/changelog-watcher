@@ -9,13 +9,14 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const label = (labelText, shortText) => ({ get label() { return t(labelText); }, get short() { return t(shortText); } });
 const STATUS = {
   up_to_date: label("Up to date", "Up to date"),
+  tolerated: label("Within tolerance", "Tolerated"),
   patch: label("Bugfix available", "Bugfix"),
   minor: label("Minor available", "Minor"),
   major: label("Major available", "Major"),
   unknown: label("Unknown", "Unknown"),
 };
-const STATUS_KEYS = ["up_to_date", "patch", "minor", "major", "unknown"];
-const STATUS_VAR = { up_to_date: "--st-up", patch: "--st-patch", minor: "--st-minor", major: "--st-major", unknown: "--st-unknown" };
+const STATUS_KEYS = ["up_to_date", "tolerated", "patch", "minor", "major", "unknown"];
+const STATUS_VAR = { up_to_date: "--st-up", tolerated: "--st-tolerated", patch: "--st-patch", minor: "--st-minor", major: "--st-major", unknown: "--st-unknown" };
 const RELATION = {
   get same() { return t("Same"); },
   get source_ahead() { return t("Source ahead"); },
@@ -513,7 +514,7 @@ async function viewDashboard(view) {
     <div class="filters">${filter.html}${d.namespaces.length ? `<select id="ns-filter" aria-label="Namespace"><option value="">${t("All namespaces")}</option>${d.namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}<div class="spacer" style="flex:1"></div>
       <button type="button" class="btn ghost sm kpi-toggle" id="kpi-toggle" aria-expanded="${!kpisHidden}" aria-controls="kpis"><span>${t("Indicators")}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
     <div class="grid kpis" id="kpis" ${kpisHidden ? "hidden" : ""}>
-      ${kpi(t("Environment up to date"), pct(ratio), t("{n} of {total} with a known version", { n: o.counts.up_to_date, total: o.known }), `<div class="meter"><i style="width:${(ratio || 0) * 100}%"></i></div>`, "hero", { status: "up_to_date", env: S.envFilter })}
+      ${kpi(t("Environment up to date"), pct(ratio), t("{n} of {total} with a known version", { n: o.counts.up_to_date, total: o.known }) + (o.counts.tolerated ? ` · ${t("{n} within tolerance", { n: o.counts.tolerated })}` : ""), `<div class="meter"><i style="width:${(ratio || 0) * 100}%"></i></div>`, "hero", { status: "up_to_date", env: S.envFilter })}
       ${kpi(t("Monitored deployments"), num(o.total), t("{apps} applications · {n} without an identified version", { apps: d.projects, n: o.counts.unknown }), "", "", { env: S.envFilter })}
       ${kpi(`${badge("patch", t("Bugfix"))} ${t("pending")}`, num(o.patch_pending), t("{n} with only a bugfix pending", { n: o.counts.patch }), "", "", { status: "has_patch", env: S.envFilter })}
       ${kpi(`${badge("minor", t("Minor"))} ${t("pending")}`, num(o.minor_pending), t("{n} with minor as the largest jump", { n: o.counts.minor }), "", "", { status: "has_minor", env: S.envFilter })}
@@ -680,6 +681,10 @@ function projectForm(p = null, isNew = !p, hint = {}) {
     ${S.meta.eol?.enabled ? `<fieldset><legend>${t("End of life (EOL)")}</legend><div class="form-grid">
       ${field(t("Product on endoflife.date"), `${inp("eol_product", p.eol_product, `list="eol-products" autocomplete="off" placeholder="${esc(p.eol_data?.product && !p.eol_product ? t("automatic: {product}", { product: p.eol_data.product }) : (S.meta.eol.auto_match ? t("automatic by name/repository") : t("e.g. postgresql")))}"`)}<datalist id="eol-products"></datalist>`, `${t("e.g. <code>postgresql</code>, <code>kubernetes</code>, <code>redis</code> · empty = search by name · <code>none</code> disables")} · <a href="https://endoflife.date" target="_blank" rel="noopener">endoflife.date</a> <span id="eol-hint"></span>`, "full")}
     </div></fieldset>` : ""}
+    <fieldset><legend>${t("Outdated tolerance")}</legend><div class="form-grid">
+      ${toleranceFields(p, S.meta.tolerance)}
+      <p class="small muted full" style="margin:0">${t("empty = global value (Settings page)")}</p>
+    </div></fieldset>
     <fieldset><legend>${t("Discover the version in use via Prometheus")}</legend><div class="form-grid">
       ${field(t("Detection mode"), `<select name="detection_mode">${Object.entries(S.meta.detection_modes).map(([k, v]) => opt(k, v, p.detection_mode)).join("")}</select>`, t("uses <code>kube_pod_container_info</code> from kube-state-metrics"), "full")}
       <div data-mode="workload">${field(t("Workload type"), `<select name="workload_kind">${["deployment", "statefulset", "daemonset", "cronjob"].map((k) => opt(k, k, p.workload_kind)).join("")}</select>`)}</div>
@@ -1186,6 +1191,11 @@ async function viewSettings(view) {
     <div class="form-grid">
       ${field(t("Interface, reports and webhook language"), `<select name="language">${Object.entries(c.languages).map(([k, v]) => opt(k, v, c.language)).join("")}</select>`, t("default: <code>APP_LANGUAGE</code> (Helm: <code>config.language</code>)"), "full")}
     </div>
+    <div class="card-head" style="margin-top:18px"><h2>${t("Outdated tolerance")}</h2></div>
+    <p class="small muted">${t("An application behind only by bugfix or minor, inside every limit filled in, shows as within tolerance and is not counted as outdated. A pending major is always outdated. Empty disables the criterion; each application can override these values.")}</p>
+    <div class="form-grid">
+      ${toleranceFields(c)}
+    </div>
     <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">${t("Save")}</button></div>
   </form>`;
   $("#st-form", view).addEventListener("submit", async (e) => {
@@ -1197,6 +1207,12 @@ async function viewSettings(view) {
       route();
     } catch (err) { toast(err.message, true); }
   });
+}
+
+/** Inputs of the 3 tolerance criteria; ``placeholders`` (per project) shows the global values. */
+function toleranceFields(values, placeholders = null) {
+  return [["tolerance_days", t("Max. days outdated")], ["tolerance_minors", t("Max. minors behind")], ["tolerance_bugfixes", t("Max. bugfixes behind")]]
+    .map(([k, text]) => field(text, inp(k, values[k], `type="number" min="0" placeholder="${esc(placeholders?.[k] ?? t("no limit"))}"`))).join("");
 }
 
 // ------------------------------------------------------------------ logs

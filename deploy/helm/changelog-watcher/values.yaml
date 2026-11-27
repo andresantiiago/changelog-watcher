@@ -83,6 +83,13 @@ config:
     warningDays: 90
     # Without a product set on the application, looks its name/repository up in endoflife.date's list.
     autoMatch: true
+  # Outdated tolerance: a deployment behind only by bugfix/minor and inside every limit set here
+  # shows as "within tolerance" instead of outdated. "off" disables a criterion; the Settings page
+  # and each application can override these.
+  tolerance:
+    days: 60      # days since the first newer version
+    minors: 1     # minor lines behind
+    bugfixes: 3   # bugfix versions behind
   # If true, the seed file (below) overwrites changes made in the UI.
   seedOverwrite: false
   # Extra (non-secret) variables.

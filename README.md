@@ -79,7 +79,7 @@ For each deployment (application × environment) the watcher takes every publish
 | **bugfix** | highest version with the same `major.minor` | 1.1.7 |
 | **minor** | highest version with the same `major` and a higher `minor` | 1.3.1 |
 | **major** | highest version with a higher `major` | 2.0.0 |
-| **status** | the largest jump available: `up_to_date`, `patch`, `minor`, `major` or `unknown` | `major` |
+| **status** | the largest jump available: `up_to_date`, `tolerated`, `patch`, `minor`, `major` or `unknown` | `major` |
 | **outdated for** | days since the first version newer than the one in use was published | 200 days |
 | **libyears** | years between the publication of the version in use and of the latest one ([libyear](https://libyear.com)) | 1.1 |
 
@@ -104,6 +104,26 @@ normalized. A single number with a leading zero (`v011`, `007`) is not a version
 counter (CoreDNS's 2016 tags) and would be read as major 11. Use a **tag pattern** (regex) to
 filter monorepo tags and the **`major.bugfix` version scheme** for projects like PostgreSQL,
 where `16.2 → 16.9` is a bugfix.
+
+### Outdated tolerance
+
+Keeping everything on the latest version is rarely realistic. A deployment behind only by a
+bugfix or a minor, and inside **every** limit that is set, gets the status `tolerated` ("within
+tolerance") and is not counted as outdated (dashboard, report, webhooks, outdated delay
+metrics). A pending major is always outdated. Each criterion is optional (`off` in the env var, or an
+empty field on the Settings page, disables it):
+
+| Criterion | Compared with | Env var | Default |
+|---|---|---|---|
+| max. days outdated | days since the first newer version | `TOLERANCE_DAYS` | `60` |
+| max. minors behind | newer minor lines on the same major (`1.1 → 1.3` = 2) | `TOLERANCE_MINORS` | `1` |
+| max. bugfixes behind | newer bugfix versions on the same `major.minor` | `TOLERANCE_BUGFIXES` | `3` |
+
+The env vars are the default, editable on the Settings page (Helm: `config.tolerance`). Each
+application can set its own limits; an empty field uses the global value. With no criterion set
+the tolerance is off. `app_update_level` keeps the pending update (1 bugfix, 2 minor), while
+`app_info{status="tolerated"}` and `environment_apps{status="tolerated"}` mark the tolerated
+ones; `environment_up_to_date_ratio` still counts only `up_to_date`.
 
 ## End of life (EOL)
 
@@ -427,6 +447,7 @@ networks are still allowed.
 | `EOL_API_URL` | `https://endoflife.date/api` | endoflife.date API (or a mirror) |
 | `EOL_WARNING_DAYS` | `90` | warns "EOL soon" when at most N days are left |
 | `EOL_AUTO_MATCH` | `true` | without a product set, looks the application's name/repository up |
+| `TOLERANCE_DAYS` / `TOLERANCE_MINORS` / `TOLERANCE_BUGFIXES` | `60` / `1` / `3` | [outdated tolerance](#outdated-tolerance); `off` disables the criterion; editable on the Settings page |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth on the UI/API, required (`/healthz` and `/readyz` stay open); without them the application does not start |
 | `AUTH_DISABLED` | `false` | `true` runs without authentication (local tests only) |
 | `METRICS_TOKEN` | — | bearer token required on `/metrics`; empty = open |
