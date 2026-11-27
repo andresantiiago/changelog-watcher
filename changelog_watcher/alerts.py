@@ -40,24 +40,23 @@ def find_alerts(session: Session, webhook: Webhook, statuses=None) -> list[dict]
         project = session.get(Project, st.project_id)
         versions = versions_cache.setdefault(project.id, project_versions(project))
         current = pv(project, st.current_version)
-
-        def add(rule: str, version: str, **extra) -> None:
-            entry = versions.get(pv(project, version))
-            out.append({"rule": rule, "project_id": st.project_id, "project": st.project,
-                        "environment_id": st.environment_id, "environment": st.environment,
-                        "current_version": st.current_version, "version": version,
-                        "url": entry.release.url if entry else None, **extra})
-
+        hits: list[tuple[str, str]] = []  # (rule, version)
         if webhook.alert_major and st.major_behind and st.latest_major:
-            add("major", st.latest_major)
+            hits.append(("major", st.latest_major))
         if webhook.alert_security and current:
             fixes = [v for v, e in versions.items()
                      if v > current and SECURITY_RE.search(f"{e.release.title or ''}\n{e.release.notes or ''}")]
             if fixes:
-                add("security", str(max(fixes)))
+                hits.append(("security", str(max(fixes))))
         days = webhook.alert_overdue_days
         if days and st.status in STATUS_OUTDATED and st.outdated_days > days and st.latest_version:
-            add("overdue", st.latest_version, days=round(st.outdated_days))
+            hits.append(("overdue", st.latest_version))
+        for rule, version in hits:
+            entry = versions.get(pv(project, version))
+            out.append({"rule": rule, "project_id": st.project_id, "project": st.project,
+                        "environment_id": st.environment_id, "environment": st.environment,
+                        "current_version": st.current_version, "version": version,
+                        "url": entry.release.url if entry else None, "days": round(st.outdated_days)})
     return out
 
 
