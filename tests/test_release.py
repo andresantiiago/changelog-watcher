@@ -11,43 +11,41 @@ _spec.loader.exec_module(rv)
 
 
 def test_first_release_uses_declared_version():
-    assert rv.next_version(["0.1.0", "v0.1.0-rc1", "v0.1.0-rc1"], None, "") == "v0.1.0"
-    assert rv.next_version(["not-semver"], None, "") == "v0.1.0"
+    assert rv.next_version(["0.1.0", "v0.1.0-rc1", "v0.1.0-rc1"], None) == "v0.1.0"
+    assert rv.next_version(["not-semver"], None) == "v0.1.0"
 
 
-def test_declared_bump_wins_over_commits():
-    assert rv.next_version(["0.3.0"], "v0.2.5", "fix: x") == "v0.3.0"
-    # bumped only in the chart, or left as an rc: the release is the final version
-    assert rv.next_version(["0.2.5", "v0.3.0-rc2", "v0.3.0-rc2"], "v0.2.5", "") == "v0.3.0"
-    assert rv.next_version(["0.3.0rc1"], "v0.2.5", "") == "v0.3.0"
+def test_declared_version_wins_over_patch():
+    assert rv.next_version(["0.3.0"], "v0.2.5") == "v0.3.0"
+    assert rv.next_version(["0.2.5", "v0.3.0-rc2", "v0.3.0-rc2"], "v0.2.5") == "v0.3.0"
+    assert rv.next_version(["0.3.0rc1"], "v0.2.5") == "v0.3.0"
 
 
-def test_bump_from_copilot_then_commits():
-    assert rv.next_version(["0.2.5"], "v0.2.5", "fix: x", kind="minor") == "v0.3.0"
-    assert rv.next_version(["0.2.5"], "v0.2.5", "Fix crash") == "v0.2.6"
-    assert rv.next_version(["0.2.5"], "v0.2.5", "feat(api): new endpoint") == "v0.3.0"
-    assert rv.next_version(["0.2.5"], "v0.2.5", "Drop field [minor]") == "v0.3.0"
-    assert rv.next_version(["0.2.5"], "v0.2.5", "feat!: rename") == "v1.0.0"
-    assert rv.next_version(["0.2.5"], "v0.2.5", "x\n\nBREAKING CHANGE: y") == "v1.0.0"
-    # declared lower than (or an rc of) the last tag is ignored
-    assert rv.next_version(["0.1.0", "v0.2.5-rc1"], "v0.2.5", "") == "v0.2.6"
+def test_otherwise_bumps_patch():
+    assert rv.next_version(["0.2.5"], "v0.2.5") == "v0.2.6"
+    assert rv.next_version(["0.1.0", "v0.2.5-rc1"], "v0.2.5") == "v0.2.6"
 
 
 def test_read_ai():
-    assert rv.read_ai("Minor\n- Adiciona X\n- Corrige Y\n") == ("minor", "- Adiciona X\n- Corrige Y")
-    assert rv.read_ai("```\n**patch**\n- Corrige Z\n```") == ("patch", "- Corrige Z")
-    assert rv.read_ai("Não sei classificar") == (None, "")
-    assert rv.read_ai("") == (None, "")
+    assert rv.read_ai("- Adiciona X\n- Corrige Y\n") == "- Adiciona X\n- Corrige Y"
+    assert rv.read_ai("```\n- Corrige Z\n```") == "- Corrige Z"
+    assert rv.read_ai("") == ""
+
+
+def test_release_branch(monkeypatch):
+    for branch, want in {"release-v1.2.0": "v1.2.0", "release-1.2.0": None, "fix/x": None, "": None}.items():
+        monkeypatch.setenv("HEAD_BRANCH", branch)
+        assert rv.release_branch() == want
 
 
 def test_rc_tag_becomes_the_final_version():
     rcs = ["v0.2.0-rc1", "v0.2.0-rc3", "v0.1.0-rc9", "v0.1.0", "vbogus"]
-    assert rv.next_version(["0.1.0"], "v0.1.0", "fix: x", rcs) == "v0.2.0"
-    assert rv.next_version(["0.1.0"], None, "", ["v0.1.0-rc.2"]) == "v0.1.0"
+    assert rv.next_version(["0.1.0"], "v0.1.0", rcs) == "v0.2.0"
+    assert rv.next_version(["0.1.0"], None, ["v0.1.0-rc.2"]) == "v0.1.0"
     # rc of an already released version is ignored
-    assert rv.next_version(["0.2.0"], "v0.2.0", "fix", rcs) == "v0.2.1"
+    assert rv.next_version(["0.2.0"], "v0.2.0", rcs) == "v0.2.1"
     # a declared bump above the rc wins
-    assert rv.next_version(["0.3.0"], "v0.1.0", "", rcs) == "v0.3.0"
+    assert rv.next_version(["0.3.0"], "v0.1.0", rcs) == "v0.3.0"
 
 
 @pytest.fixture
@@ -59,6 +57,7 @@ def files(tmp_path, monkeypatch):
     monkeypatch.setattr(rv, "CHART", chart)
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     monkeypatch.delenv("AI_DIR", raising=False)
+    monkeypatch.delenv("HEAD_BRANCH", raising=False)
     return py, chart
 
 
@@ -86,7 +85,7 @@ def test_rc_tag_mode(files, capsys):
 
 
 def test_notes_from_copilot_go_to_output(files, tmp_path, monkeypatch):
-    (tmp_path / "copilot-app.txt").write_text("minor\n- Adiciona release automática\n")
+    (tmp_path / "copilot-app.txt").write_text("- Adiciona release automática\n")
     gh = tmp_path / "out"
     monkeypatch.setenv("AI_DIR", str(tmp_path))
     monkeypatch.setenv("GITHUB_OUTPUT", str(gh))
@@ -120,6 +119,7 @@ def repo(tmp_path, monkeypatch):
     for name, value in {"ROOT": tmp_path, "PYPROJECT": py, "CHART": chart}.items():
         monkeypatch.setattr(rv, name, value)
     monkeypatch.delenv("AI_DIR", raising=False)
+    monkeypatch.delenv("HEAD_BRANCH", raising=False)
     monkeypatch.chdir(tmp_path)  # write_changes grava no diretório atual
     return commit, git
 
@@ -132,12 +132,12 @@ def test_docs_only_generates_no_version(repo):
     assert rv.write_changes() is False
 
 
-def test_chart_only_bumps_only_the_chart(repo):
+def test_chart_only_bumps_only_the_chart(repo):  # fora de release-vX.Y.Z: bugfix (patch)
     commit, _ = repo
     commit("README.md", "docs", "docs: explica X")
     commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "feat(helm): networkpolicy")
     p = rv.plan()
-    assert (p["app_version"], p["chart_version"]) == ("", "v0.3.0")  # parte da tag combinada v0.2.0
+    assert (p["app_version"], p["chart_version"]) == ("", "v0.2.1")  # parte da tag combinada v0.2.0
     assert rv.write_changes() is True
     changes = (rv.ROOT / "changes-chart.txt").read_text()
     assert "chart Helm" in changes and "docs: explica X" in changes  # docs entram nas notas
@@ -150,15 +150,29 @@ def test_image_change_bumps_image_and_chart_patch(repo, tmp_path, monkeypatch):
     commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "fix(helm): x")
     git("tag", "chart-v0.2.1")
     commit("changelog_watcher/app.py", "b", "feat: nova fonte")
-    (tmp_path / "copilot-app.txt").write_text("minor\n- Adiciona fonte\n")
+    (tmp_path / "copilot-app.txt").write_text("- Adiciona fonte\n")
     monkeypatch.setenv("AI_DIR", str(tmp_path))
     p = rv.plan()
-    assert (p["app_version"], p["chart_version"]) == ("v0.3.0", "v0.2.2")  # chart sem mudanças: patch
+    assert (p["app_version"], p["chart_version"]) == ("v0.2.1", "v0.2.2")  # feat fora de release: patch
     assert p["app_notes"] == "- Adiciona fonte"
-    assert p["chart_notes"] == "- Atualiza a imagem padrão (appVersion) para v0.3.0"
+    assert p["chart_notes"] == "- Atualiza a imagem padrão (appVersion) para v0.2.1"
     rv.main([])
-    assert rv.CHART.read_text() == 'version: v0.2.2\nappVersion: "v0.3.0"\n'
-    assert rv.PYPROJECT.read_text() == 'version = "0.3.0"\n'
+    assert rv.CHART.read_text() == 'version: v0.2.2\nappVersion: "v0.2.1"\n'
+    assert rv.PYPROJECT.read_text() == 'version = "0.2.1"\n'
+
+
+
+def test_release_branch_sets_both_versions(repo, monkeypatch):
+    commit, git = repo
+    commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "fix(helm): x")
+    git("tag", "chart-v0.2.1")
+    commit("changelog_watcher/app.py", "b", "fix: x")
+    monkeypatch.setenv("HEAD_BRANCH", "release-v1.0.0")
+    p = rv.plan()
+    assert (p["app_version"], p["chart_version"]) == ("v1.0.0", "v1.0.0")
+    monkeypatch.setenv("HEAD_BRANCH", "release-v0.2.0")  # não é maior que a última tag
+    with pytest.raises(SystemExit, match="release-v0.2.0"):
+        rv.plan()
 
 
 _s = importlib.util.spec_from_file_location("test_summary", Path(__file__).parents[1] / ".github/scripts/test_summary.py")
