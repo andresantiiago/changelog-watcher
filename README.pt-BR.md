@@ -331,8 +331,40 @@ ConfigMap do dashboard.
 
 A UI/API exige Basic Auth por padrão (`auth.enabled: true`). Sem `auth.password` nem
 `auth.existingSecret`, o chart gera uma senha aleatória no Secret (mantida nos upgrades); o
-comando para lê-la aparece nas notas do `helm install`. Use TLS no Ingress (`ingress.tls`):
-a senha vai em cada requisição.
+comando para lê-la aparece nas notas do `helm install`. Use TLS no Ingress (`ingress.tls`,
+`ingress.ingressRoute.tls` ou o listener HTTPS do Gateway): a senha vai em cada requisição.
+
+#### Ingress, IngressRoute ou HTTPRoute
+
+`ingress.type` escolhe como a UI é exposta (com `ingress.enabled: true`); `ingress.hosts`
+(caminhos `Prefix` ou `Exact`) e `ingress.annotations` valem para os três:
+
+| `ingress.type` | Recurso | Valores específicos |
+|---|---|---|
+| `ingress` (padrão) | Ingress `networking.k8s.io/v1` | `ingress.className`, `ingress.tls` |
+| `ingressroute` | IngressRoute do Traefik `traefik.io/v1alpha1` | `ingress.ingressRoute.entryPoints`, `.middlewares`, `.tls` (ex.: `{secretName: cw-tls}` ou `{certResolver: letsencrypt}`) |
+| `httproute` | HTTPRoute do Gateway API `gateway.networking.k8s.io/v1` | `ingress.httpRoute.parentRefs` (obrigatório; o TLS fica no listener do Gateway) |
+
+```yaml
+ingress:
+  enabled: true
+  type: httproute
+  hosts:
+    - host: changelog-watcher.example.com
+      paths: [{path: /, pathType: Prefix}]
+  httpRoute:
+    parentRefs: [{name: public, namespace: gateway-system, sectionName: https}]
+```
+
+- Anotações do controlador de Ingress (`traefik.ingress.kubernetes.io/*`, `cert-manager.io/*`)
+  não valem para IngressRoute nem HTTPRoute: configure entry points, TLS e middlewares em
+  `ingress.ingressRoute`, e o TLS no Gateway.
+- IngressRoute: defina `entryPoints` (ex.: `[websecure]`) junto com `tls`; vazio significa todos
+  os entry points do Traefik, inclusive HTTP puro. O `PathPrefix` do Traefik é prefixo de texto
+  (`/api` também casa `/apiary`).
+- HTTPRoute: aponte `sectionName` (ou `port`) para o listener HTTPS, senão a rota também se liga
+  aos listeners HTTP. Todos os caminhos valem para todos os hosts.
+- Os dois aceitam só caminhos `Prefix`/`Exact`, e hosts/caminhos não podem ter crases.
 
 #### NetworkPolicies
 
