@@ -18,8 +18,9 @@ def _d(days: int) -> str:
 
 PG_CYCLES = [
     {"cycle": "17", "releaseDate": "2024-09-26", "eol": _d(1500), "latest": "17.2"},
-    {"cycle": "13", "releaseDate": "2020-09-24", "eol": _d(30), "latest": "13.18"},
-    {"cycle": "12", "releaseDate": "2019-10-03", "eol": _d(-20), "latest": "12.22"},
+    {"cycle": "13", "releaseDate": "2020-09-24", "eol": _d(30), "latest": "13.18",
+     "link": "https://www.postgresql.org/support/versioning/"},
+    {"cycle": "12", "releaseDate": "2019-10-03", "eol": _d(-20), "latest": "12.22", "link": "javascript:alert(1)"},
 ]
 
 
@@ -108,6 +109,10 @@ def test_refresh_and_outputs(respx_mock, client, seeded):
     assert statuses["postgres"]["eol_cycle"] == "13" and statuses["postgres"]["eol_status"] == "soon"
     assert statuses["postgres"]["eol_days_left"] == 30 and statuses["postgres"]["eol_cycle_latest"] == "13.18"
     assert statuses["pg-old"]["eol_status"] == "eol"
+    # the cycle's vendor page; a non-http(s) link falls back to the product page on endoflife.date
+    assert statuses["postgres"]["eol_link"] == "https://www.postgresql.org/support/versioning/"
+    assert statuses["pg-old"]["eol_link"] == "https://endoflife.date/postgresql"
+    assert statuses["app-a"]["eol_link"] is None
     assert statuses["app-a"]["eol_status"] is None
 
     dash = client.get("/api/dashboard").json()

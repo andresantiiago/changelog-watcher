@@ -79,6 +79,8 @@ def normalize_cycle(item: dict) -> dict | None:
         "latest": str(item["latest"]) if item.get("latest") else None,
         "release_date": _date_or_bool(item.get("releaseDate")) or None,
         "lts": bool(item.get("lts")),
+        # vendor page announcing the cycle's support/EOL; only http(s), since it becomes a link in the UI
+        "link": link if isinstance(link := item.get("link"), str) and link.startswith(("https://", "http://")) else None,
     }
 
 
@@ -173,18 +175,19 @@ def eol_status(cycle: dict, today: date, warning_days: int) -> tuple[str | None,
 def deployment_eol(project: Project, version: Version | None, now: datetime | None = None) -> dict:
     """EOL fields of one deployment (all None when unknown)."""
     out = {"eol_product": None, "eol_cycle": None, "eol_date": None, "eol_days_left": None, "eol_status": None,
-           "eol_cycle_latest": None}
+           "eol_cycle_latest": None, "eol_link": None}
     data = project.eol_data or {}
     if not data.get("product"):
         return out
     out["eol_product"] = data["product"]
+    out["eol_link"] = f"https://endoflife.date/{data['product']}"
     cycle = find_cycle(version, data.get("cycles") or [])
     if cycle is None:
         return out
     today = (now or datetime.now(timezone.utc)).date()
     status, eol_date, left = eol_status(cycle, today, get_settings().eol_warning_days)
     out.update(eol_cycle=cycle["cycle"], eol_date=eol_date, eol_days_left=left, eol_status=status,
-               eol_cycle_latest=cycle.get("latest"))
+               eol_cycle_latest=cycle.get("latest"), eol_link=cycle.get("link") or out["eol_link"])
     return out
 
 
