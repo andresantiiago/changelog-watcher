@@ -14,18 +14,16 @@ release. Antes da separação as tags ``vX.Y.Z`` valiam para os dois; sem nenhum
 ``chart-v*``, o chart parte da última ``vX.Y.Z``.
 
 ``--changes``: grava ``changes-<componente>.txt`` (commits, arquivos e diff truncado
-desde a última tag do componente) para cada componente com mudanças, que o Copilot classifica
-(linha 1: major|minor|patch) e resume (demais linhas) em ``copilot-<componente>.txt``.
-Escreve ``any=true|false`` em $GITHUB_OUTPUT.
+desde a última tag do componente) para cada componente com mudanças, que o Copilot resume em
+``copilot-<componente>.txt`` (notas da release). Escreve ``any=true|false`` em $GITHUB_OUTPUT.
 
-Merge na main (sem argumento), para cada componente com mudanças:
-1. Se a versão declarada (pyproject.toml/``appVersion`` para a imagem, ``version`` do Chart.yaml
-   para o chart) ou, só na imagem, a de uma tag ``vX.Y.Z-rcN`` for maior que a última tag final,
-   usa a maior delas sempre sem o sufixo: o merge na main é a versão final (v0.2.0-rc3 -> v0.2.0).
-2. Senão, incrementa a última tag final pelo tipo que o Copilot respondeu (arquivos em
-   $AI_DIR); sem resposta válida, pelas mensagens dos commits do componente:
-   ``BREAKING CHANGE`` / ``tipo!:`` / ``[major]`` -> major; ``feat:`` / ``[minor]`` -> minor;
-   o resto -> patch.
+Merge na main (sem argumento), para cada componente com mudanças; $HEAD_BRANCH é a branch do PR:
+1. Branch ``release-vX.Y.Z``: a versão é ``vX.Y.Z``. A imagem falha se ela não for maior que a
+   última tag final; o chart, nesse caso, só incrementa o patch.
+2. Outra branch (ou push direto): bugfix. Se a versão declarada (pyproject.toml/``appVersion``
+   para a imagem, ``version`` do Chart.yaml para o chart) ou, só na imagem, a de uma tag
+   ``vX.Y.Z-rcN`` for maior que a última tag final, usa a maior delas sempre sem o sufixo: o
+   merge na main é a versão final (v0.2.0-rc3 -> v0.2.0). Senão incrementa o patch.
 
 Tag de release candidate da imagem (argumento ``vX.Y.Z-rcN``): só valida e grava essa versão
 nos arquivos da imagem, para ela reportar a versão certa (sem commit).
@@ -57,7 +55,7 @@ DOC_PATHS = ("README.md", "README.pt-BR.md", "docs")
 CHART_TAG = "chart-"
 SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 RC = re.compile(r"^v?(\d+\.\d+\.\d+)-?rc\.?\d+$")  # v0.2.0-rc1, 0.2.0rc1 (PEP 440)
-KINDS = ("major", "minor", "patch")
+RELEASE_BRANCH = re.compile(r"^release-(v\d+\.\d+\.\d+)$")
 MAX_CHANGES = 60_000  # cabe num argumento de linha de comando (limite de 128 KiB)
 
 
@@ -76,36 +74,18 @@ def fmt(v: tuple[int, int, int]) -> str:
     return "v" + ".".join(map(str, v))
 
 
-def bump_kind(messages: str) -> str:
-    if re.search(r"BREAKING[ -]CHANGE|^\w+(\(.+\))?!:|\[major\]", messages, re.M | re.I):
-        return "major"
-    if re.search(r"^feat(\(.+\))?:|\[minor\]", messages, re.M | re.I):
-        return "minor"
-    return "patch"
+def read_ai(text: str) -> str:
+    """Resposta do Copilot -> notas (sem cercas de código)."""
+    return "\n".join(ln for ln in text.strip().splitlines() if not ln.strip().startswith("```")).strip()
 
 
-def bump(v: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
-    major, minor, patch = v
-    if kind == "major":
-        return (major + 1, 0, 0)
-    if kind == "minor":
-        return (major, minor + 1, 0)
-    return (major, minor, patch + 1)
+def release_branch() -> str | None:
+    """vX.Y.Z de um PR vindo de ``release-vX.Y.Z``; None para outras branches (bugfix)."""
+    m = RELEASE_BRANCH.match(os.environ.get("HEAD_BRANCH", ""))
+    return m.group(1) if m else None
 
 
-def read_ai(text: str) -> tuple[str | None, str]:
-    """Resposta do Copilot -> (tipo ou None, notas)."""
-    lines = [ln for ln in text.strip().splitlines() if not ln.strip().startswith("```")]
-    if not lines:
-        return None, ""
-    first = re.sub(r"[^a-z]", "", lines[0].lower())
-    if first not in KINDS:
-        return None, ""
-    return first, "\n".join(lines[1:]).strip()
-
-
-def next_version(declared: list[str], last_tag: str | None, messages: str, rc_tags: list[str] = (),
-                 kind: str | None = None) -> str:
+def next_version(declared: list[str], last_tag: str | None, rc_tags: list[str] = ()) -> str:
     last = parse(last_tag)
     rc_bases = [base(t) for t in rc_tags if RC.match(t)]
     ahead = [v for v in [*map(base, declared), *rc_bases] if v and (last is None or v > last)]
@@ -114,7 +94,7 @@ def next_version(declared: list[str], last_tag: str | None, messages: str, rc_ta
     elif last is None:
         v = (0, 1, 0)
     else:
-        v = bump(last, kind or bump_kind(messages))
+        v = (last[0], last[1], last[2] + 1)
     return fmt(v)
 
 
@@ -190,29 +170,26 @@ def _declared() -> dict[str, list[str]]:
     return {"app": [m.group(1) for m in (py, app) if m], "chart": [ver.group(1)] if ver else []}
 
 
-def _ai(component: str) -> tuple[str | None, str]:
+def _ai(component: str) -> str:
     d = os.environ.get("AI_DIR")
     path = d and Path(d, f"copilot-{component}.txt")
-    return read_ai(path.read_text()) if path and path.exists() else (None, "")
+    return read_ai(path.read_text()) if path and path.exists() else ""
 
 
 def plan() -> dict[str, str]:
     """Versões (vazio = sem release) e notas de cada componente desde a última tag."""
-    declared, tags = _declared(), last_tags()
+    declared, tags, release = _declared(), last_tags(), release_branch()
     out = {"app_version": "", "chart_version": "", "app_notes": "", "chart_notes": ""}
     if changed("app", tags["app"]):
-        kind, notes = _ai("app")
-        rc_tags = _git("tag", "--list", "v*").split()  # rc pode estar em commits fora da main (squash)
-        out["app_version"] = next_version(declared["app"], tags["app"], commit_log("app", tags["app"]),
-                                          rc_tags, kind)
-        out["app_notes"] = notes or commit_log("app", tags["app"], "- %s")
+        if release and tags["app"] and parse(release) <= parse(tags["app"]):
+            sys.exit(f"branch release-{release}: a versão precisa ser maior que a última tag {tags['app']}")
+        rc_tags = [] if release else _git("tag", "--list", "v*").split()  # rc pode estar fora da main (squash)
+        out["app_version"] = next_version([release] if release else declared["app"], tags["app"], rc_tags)
+        out["app_notes"] = _ai("app") or commit_log("app", tags["app"], "- %s")
     chart_changed = changed("chart", tags["chart"])
     if chart_changed or out["app_version"]:
-        kind, notes = _ai("chart") if chart_changed else (None, "")
-        if chart_changed and not notes:
-            notes = commit_log("chart", tags["chart"], "- %s")
-        messages = commit_log("chart", tags["chart"]) if chart_changed else ""  # só appVersion: patch
-        out["chart_version"] = next_version(declared["chart"], tags["chart"], messages, kind=kind)
+        notes = (_ai("chart") or commit_log("chart", tags["chart"], "- %s")) if chart_changed else ""
+        out["chart_version"] = next_version([release] if release else declared["chart"], tags["chart"])
         if out["app_version"]:
             notes = f"{notes}\n- Atualiza a imagem padrão (appVersion) para {out['app_version']}".strip()
         out["chart_notes"] = notes
@@ -232,7 +209,7 @@ def main(argv: list[str]) -> None:
     if argv:  # build de uma tag de release candidate da imagem
         if not argv[0].startswith("v") or not RC.match(argv[0]):
             sys.exit(f"tag inválida: {argv[0]} (esperado vX.Y.Z-rcN)")
-        notes = _ai("app")[1] or commit_log("app", last_final_tag(), "- %s")
+        notes = _ai("app") or commit_log("app", last_final_tag(), "- %s")
         result = {"app_version": argv[0], "chart_version": "", "app_notes": notes, "chart_notes": ""}
         prerelease = True
     else:

@@ -622,13 +622,15 @@ resumo da execução no GitHub Actions e num comentário no PR (atualizado a cad
 primeiro executa o `ci` e só então, para cada componente que mudou desde a sua última tag:
 
 1. o Copilot CLI lê as mudanças do componente (commits, arquivos e diff, mais os READMEs e `docs/`)
-   e responde `major`, `minor` ou `patch` mais até 3 tópicos descrevendo o que mudou;
-2. a versão vem do arquivo do componente (`pyproject.toml`/`appVersion` para a imagem,
-   `version` do `Chart.yaml` para o chart) ou, só na imagem, de uma tag `vX.Y.Z-rcN`, quando
-   for maior que a última tag final (vale a maior). O sufixo `-rcN` é sempre removido: o merge
-   na `main` é a versão final (`v0.2.0-rc3` → `v0.2.0`). Senão a última tag é incrementada
-   pela classificação do Copilot (sem resposta válida, pelas mensagens dos commits do
-   componente: `BREAKING CHANGE`/`tipo!:`/`[major]` → major, `feat:`/`[minor]` → minor, o resto → patch);
+   e escreve até 3 tópicos descrevendo o que mudou (as notas da release);
+2. a versão vem do **nome da branch do PR**:
+   - `release-vX.Y.Z` (ex.: `release-v1.2.0`): a release é `vX.Y.Z` para a imagem e
+     `chart-vX.Y.Z` para o chart. O workflow falha se `vX.Y.Z` não for maior que a última tag da
+     imagem; se o chart já estiver nela ou acima, o chart recebe um patch;
+   - qualquer outra branch (ou push direto) é **bugfix**: a última tag recebe um patch, a não ser
+     que o arquivo do componente (`pyproject.toml`/`appVersion` para a imagem, `version` do
+     `Chart.yaml` para o chart) ou, só na imagem, uma tag `vX.Y.Z-rcN` tenha uma versão maior
+     (vale a maior, sempre sem o sufixo `-rcN`: `v0.2.0-rc3` → `v0.2.0`);
 3. se o `pyproject.toml` ou o `Chart.yaml` ficaram desatualizados, o workflow faz o commit
    corrigindo (`chore(release): vX.Y.Z, chart-vX.Y.Z [skip ci]`);
 4. cria as tags; para a imagem publica `ghcr.io/andresantiiago/changelog-watcher` com as tags

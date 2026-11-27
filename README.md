@@ -631,14 +631,15 @@ the run summary on GitHub Actions and in a PR comment (updated on every push). E
 changed since its last tag:
 
 1. the Copilot CLI reads the component's changes (commits, files and diff, plus the READMEs and
-   `docs/`) and answers `major`, `minor` or `patch` plus up to 3 topics describing what changed;
-2. the version comes from the component's file (`pyproject.toml`/`appVersion` for the image,
-   `version` in `Chart.yaml` for the chart) or, for the image only, from a `vX.Y.Z-rcN` tag, when
-   higher than the last final tag (the highest wins). The `-rcN` suffix is always removed: the
-   merge into `main` is the final version (`v0.2.0-rc3` → `v0.2.0`). Otherwise the last tag is
-   bumped by Copilot's classification (without a valid answer, by the component's commit
-   messages: `BREAKING CHANGE`/`type!:`/`[major]` → major, `feat:`/`[minor]` → minor, the rest →
-   patch);
+   `docs/`) and writes up to 3 topics describing what changed (the release notes);
+2. the version comes from the **name of the PR's branch**:
+   - `release-vX.Y.Z` (e.g. `release-v1.2.0`): the release is `vX.Y.Z` for the image and
+     `chart-vX.Y.Z` for the chart. The workflow fails if `vX.Y.Z` is not higher than the image's
+     last tag; if the chart is already at or past it, the chart gets a patch instead;
+   - any other branch (or a direct push) is a **bugfix**: the last tag gets a patch bump, unless
+     the component's file (`pyproject.toml`/`appVersion` for the image, `version` in `Chart.yaml`
+     for the chart) or, for the image only, a `vX.Y.Z-rcN` tag holds a higher version (the highest
+     wins, always without the `-rcN` suffix: `v0.2.0-rc3` → `v0.2.0`);
 3. if `pyproject.toml` or `Chart.yaml` are out of date, the workflow commits the fix
    (`chore(release): vX.Y.Z, chart-vX.Y.Z [skip ci]`);
 4. creates the tags; for the image it publishes `ghcr.io/andresantiiago/changelog-watcher` with
