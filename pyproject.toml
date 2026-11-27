@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "respx>=0.21", "pytest-cov>=6", "ruff>=0.15"]
+dev = ["pytest>=8", "respx>=0.21", "pytest-cov>=6", "ruff>=0.15", "mypy>=1.15"]
 
 [project.scripts]
 changelog-watcher = "changelog_watcher.cli:main"
@@ -48,3 +48,9 @@ line-length = 120
 # pyflakes + erros graves do pycodestyle, imports ordenados, sintaxe moderna e bugbear.
 select = ["E4", "E7", "E9", "F", "I", "UP", "B", "RUF100"]
 ignore = ["B008"]  # Depends()/Query() em default de argumento é o padrão do FastAPI
+
+[tool.mypy]
+# Começa pela classificação de versões; amplie a lista conforme os módulos forem tipados.
+files = ["changelog_watcher/versioning.py"]
+follow_imports = "silent"
+ignore_missing_imports = true

@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 _spec = importlib.util.spec_from_file_location(
-    "release_version", Path(__file__).parents[1] / ".github/scripts/release_version.py")
+    "release_version", Path(__file__).parents[1] / ".github/scripts/release_version.py"
+)
 rv = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rv)
 
@@ -97,9 +98,14 @@ def test_notes_from_copilot_go_to_output(files, tmp_path, monkeypatch):
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     """Repositório git com imagem, chart e docs, já na tag combinada v0.2.0 (antes da separação)."""
+
     def git(*args):
-        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
-                       cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
 
     def commit(path, text, msg):
         f = tmp_path / path
@@ -161,7 +167,6 @@ def test_image_change_bumps_image_and_chart_patch(repo, tmp_path, monkeypatch):
     assert rv.PYPROJECT.read_text() == 'version = "0.2.1"\n'
 
 
-
 def test_release_branch_sets_both_versions(repo, monkeypatch):
     commit, git = repo
     commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "fix(helm): x")
@@ -175,7 +180,9 @@ def test_release_branch_sets_both_versions(repo, monkeypatch):
         rv.plan()
 
 
-_s = importlib.util.spec_from_file_location("test_summary", Path(__file__).parents[1] / ".github/scripts/test_summary.py")
+_s = importlib.util.spec_from_file_location(
+    "test_summary", Path(__file__).parents[1] / ".github/scripts/test_summary.py"
+)
 ts = importlib.util.module_from_spec(_s)
 _s.loader.exec_module(ts)
 

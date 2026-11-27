@@ -22,9 +22,17 @@ def test_alert_rules_fire_once_per_version_and_deployment(client, seeded):
     with session_scope() as s:
         rel = s.scalar(select(Release).where(Release.tag == "v1.3.1"))
         rel.notes = "Fixes CVE-2026-12345"
-    client.post("/api/webhooks", json={"name": "a", "url": "https://hooks.test/alerts", "alert_major": True,
-                                       "alert_security": True, "alert_overdue_days": 150,
-                                       "environment_ids": [seeded["prod"]["id"]]})
+    client.post(
+        "/api/webhooks",
+        json={
+            "name": "a",
+            "url": "https://hooks.test/alerts",
+            "alert_major": True,
+            "alert_security": True,
+            "alert_overdue_days": 150,
+            "environment_ids": [seeded["prod"]["id"]],
+        },
+    )
     client.post("/api/webhooks", json={"name": "report-only", "url": "https://hooks.test/report"})
 
     assert [r["ok"] for r in _send()] == [True]
@@ -41,15 +49,18 @@ def test_alert_rules_fire_once_per_version_and_deployment(client, seeded):
         s.add(Release(project_id=seeded["app"]["id"], tag="v3.0.0", url="https://x/v3.0.0"))
     _send()
     assert {(a["rule"], a["version"]) for a in json.loads(route.calls.last.request.content)["alerts"]} == {
-        ("major", "3.0.0"), ("overdue", "3.0.0")}
+        ("major", "3.0.0"),
+        ("overdue", "3.0.0"),
+    }
 
 
 @respx.mock
 def test_failed_alert_is_retried_and_chat_format(client, seeded):
     respx.route(host="testserver").pass_through()
     route = respx.post("https://hooks.slack.test/x").mock(side_effect=[httpx.Response(500), httpx.Response(200)])
-    client.post("/api/webhooks", json={"name": "s", "kind": "slack", "url": "https://hooks.slack.test/x",
-                                       "alert_major": True})
+    client.post(
+        "/api/webhooks", json={"name": "s", "kind": "slack", "url": "https://hooks.slack.test/x", "alert_major": True}
+    )
     assert _send()[0]["ok"] is False
     assert _send()[0]["ok"] is True
     text = json.loads(route.calls.last.request.content)["text"]

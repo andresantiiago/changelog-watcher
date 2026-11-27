@@ -2,8 +2,9 @@ def test_seed_overwrite_keeps_undeclared_webhook_environments(tmp_path, client, 
     from changelog_watcher.db import session_scope
     from changelog_watcher.seed import load_seed
 
-    hook = client.post("/api/webhooks", json={"name": "hook", "url": "https://h/x",
-                                              "environment_ids": [seeded["prod"]["id"]]}).json()
+    hook = client.post(
+        "/api/webhooks", json={"name": "hook", "url": "https://h/x", "environment_ids": [seeded["prod"]["id"]]}
+    ).json()
     cfg = tmp_path / "c.yaml"
     cfg.write_text("webhooks:\n  - name: hook\n    url: https://h/y\n    kind: slack\n")
     with session_scope() as s:

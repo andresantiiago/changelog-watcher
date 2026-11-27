@@ -43,8 +43,9 @@ def test_compare(client, seeded):
     assert rows["app-a"]["releases_between"] == 3  # 1.1.5, 1.1.7, 1.2.0
     assert rows["app-b"]["relation"] == "same"
     assert rows["app-c"]["relation"] == "only_target"
-    r = client.get("/api/compare", params={"source": seeded["dev"]["id"], "target": seeded["prod"]["id"],
-                                           "only_differences": True}).json()
+    r = client.get(
+        "/api/compare", params={"source": seeded["dev"]["id"], "target": seeded["prod"]["id"], "only_differences": True}
+    ).json()
     assert "app-b" not in {row["project"] for row in r["rows"]}
 
 
@@ -73,8 +74,9 @@ def test_project_crud_and_deployments(client, seeded):
 
 
 def test_environment_secret_masking(client):
-    env = client.post("/api/environments", json={"name": "x", "prometheus_auth": "bearer",
-                                                 "prometheus_token": "abc"}).json()
+    env = client.post(
+        "/api/environments", json={"name": "x", "prometheus_auth": "bearer", "prometheus_token": "abc"}
+    ).json()
     assert env["prometheus_token"] == "********"
     env2 = client.put(f"/api/environments/{env['id']}", json={**env, "description": "d"}).json()
     from changelog_watcher.db import session_scope
@@ -101,8 +103,15 @@ def test_report_and_webhooks(client, seeded):
     slack = respx.post("https://hooks.slack.test/x").mock(return_value=httpx.Response(200))
     teams = respx.post("https://teams.test/x").mock(return_value=httpx.Response(202))
     client.post("/api/webhooks", json={"name": "slack", "kind": "slack", "url": "https://hooks.slack.test/x"})
-    client.post("/api/webhooks", json={"name": "teams", "kind": "teams", "url": "https://teams.test/x",
-                                       "environment_ids": [seeded["dev"]["id"]]})
+    client.post(
+        "/api/webhooks",
+        json={
+            "name": "teams",
+            "kind": "teams",
+            "url": "https://teams.test/x",
+            "environment_ids": [seeded["dev"]["id"]],
+        },
+    )
     r = client.post("/api/reports", json={"send": True}).json()
     assert "1.1.3" in r["markdown"] and "bugfix **1.1.7**" in r["markdown"]
     assert "Differences between environments" in r["markdown"]
@@ -144,8 +153,17 @@ def test_summarize_libyears_avg():
     from changelog_watcher.analysis import DeploymentStatus, summarize
 
     def st(lib, status="major"):
-        return DeploymentStatus(project_id=1, project="p", environment_id=1, environment="e", version_source="manual",
-                                current_version="1.0.0", status=status, level=3, libyears=lib)
+        return DeploymentStatus(
+            project_id=1,
+            project="p",
+            environment_id=1,
+            environment="e",
+            version_source="manual",
+            current_version="1.0.0",
+            status=status,
+            level=3,
+            libyears=lib,
+        )
 
     summ = summarize([st(1.0), st(3.0), st(None, "unknown"), st(0.0, "up_to_date")])
     assert summ["libyears"] == 4.0
@@ -157,10 +175,15 @@ def test_refresh_with_github(client, seeded):
     respx_mock = respx.mock(assert_all_called=False)
     with respx_mock:
         respx_mock.route(host="testserver").pass_through()
-        respx_mock.get("https://api.github.com/repos/org/app-a/releases").mock(return_value=httpx.Response(200, json=[
-            {"tag_name": "v2.2.0", "body": "new", "published_at": "2026-01-01T00:00:00Z", "draft": False}]))
+        respx_mock.get("https://api.github.com/repos/org/app-a/releases").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"tag_name": "v2.2.0", "body": "new", "published_at": "2026-01-01T00:00:00Z", "draft": False}],
+            )
+        )
         respx_mock.get(url__regex=r"https://api\.github\.com/repos/org/app-[bc]/releases").mock(
-            return_value=httpx.Response(404))
+            return_value=httpx.Response(404)
+        )
         r = client.post("/api/refresh", json={"wait": True, "detect": False}).json()
     assert r["new_releases"] == 1
     assert r["projects_failed"] == 2
@@ -247,6 +270,7 @@ def test_settings_and_logs(client):
     assert r.json()["report_cron"] == "0 8 * * fri"
     assert client.get("/api/meta").json()["schedule"]["refresh_interval_minutes"] == 30
     import logging
+
     logging.getLogger("changelog_watcher.test").warning("falha de teste")
     logs = client.get("/api/logs?level=warning&q=teste").json()
     assert logs and logs[0]["message"] == "falha de teste"

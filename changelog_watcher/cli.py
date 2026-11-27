@@ -1,8 +1,8 @@
 """Command line entry point.
 
-    changelog-watcher serve            # web UI + API + scheduler
-    changelog-watcher refresh          # one-off refresh
-    changelog-watcher report [--send]  # build (and send) the report
+changelog-watcher serve            # web UI + API + scheduler
+changelog-watcher refresh          # one-off refresh
+changelog-watcher report [--send]  # build (and send) the report
 """
 
 from __future__ import annotations
@@ -28,8 +28,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "serve":
         import uvicorn
 
-        uvicorn.run("changelog_watcher.main:app", host=args.host, port=args.port, proxy_headers=True,
-                    forwarded_allow_ips="*")
+        uvicorn.run(
+            "changelog_watcher.main:app", host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*"
+        )
         return
 
     from .config import get_settings

@@ -607,7 +607,7 @@ Grafana o histórico vem do próprio Prometheus.
 ```bash
 pytest -q
 pytest -q --cov    # testes com cobertura (mínimo no pyproject.toml)
-ruff check .
+ruff check . && ruff format --check . && mypy
 ```
 
 ```bash

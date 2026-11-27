@@ -19,8 +19,13 @@ def _d(days: int) -> str:
 
 PG_CYCLES = [
     {"cycle": "17", "releaseDate": "2024-09-26", "eol": _d(1500), "latest": "17.2"},
-    {"cycle": "13", "releaseDate": "2020-09-24", "eol": _d(30), "latest": "13.18",
-     "link": "https://www.postgresql.org/support/versioning/"},
+    {
+        "cycle": "13",
+        "releaseDate": "2020-09-24",
+        "eol": _d(30),
+        "latest": "13.18",
+        "link": "https://www.postgresql.org/support/versioning/",
+    },
     {"cycle": "12", "releaseDate": "2019-10-03", "eol": _d(-20), "latest": "12.22", "link": "javascript:alert(1)"},
 ]
 
@@ -51,27 +56,42 @@ def test_eol_status():
 
 def test_resolve_product():
     def p(**kw):
-        base = {"name": "x", "repository": "org/x", "source_type": "github_releases", "eol_product": None,
-                "chart_name": None, "use_app_version": False}
+        base = {
+            "name": "x",
+            "repository": "org/x",
+            "source_type": "github_releases",
+            "eol_product": None,
+            "chart_name": None,
+            "use_app_version": False,
+        }
         return Project(**(base | kw))
 
     products = ["postgresql", "redis", "kubernetes", "nginx"]
     assert eol.resolve_product(p(name="Postgres"), products, True) == "postgresql"  # alias
     assert eol.resolve_product(p(name="cache", repository="redis/redis"), products, True) == "redis"
-    assert eol.resolve_product(p(name="web", source_type="dockerhub", repository="library/nginx"), products,
-                               True) == "nginx"
+    assert (
+        eol.resolve_product(p(name="web", source_type="dockerhub", repository="library/nginx"), products, True)
+        == "nginx"
+    )
     assert eol.resolve_product(p(name="redis"), products, False) is None  # auto match off
     assert eol.resolve_product(p(name="redis", eol_product="none"), products, True) is None
     assert eol.resolve_product(p(name="x", eol_product="kubernetes"), None, False) == "kubernetes"
     # a chart version is not the product version
     assert eol.resolve_product(p(name="redis", source_type="helm_index", chart_name="redis"), products, True) is None
-    assert eol.resolve_product(p(name="redis", source_type="helm_index", chart_name="redis", use_app_version=True),
-                               products, True) == "redis"
+    assert (
+        eol.resolve_product(
+            p(name="redis", source_type="helm_index", chart_name="redis", use_app_version=True), products, True
+        )
+        == "redis"
+    )
 
 
 def _project(client, prod_id, name, version, **extra):
-    body = {"name": name, "repository": f"org/{name}",
-            "deployments": {str(prod_id): {"manual_version": version}}} | extra
+    body = {
+        "name": name,
+        "repository": f"org/{name}",
+        "deployments": {str(prod_id): {"manual_version": version}},
+    } | extra
     r = client.post("/api/projects?refresh=false", json=body)
     assert r.status_code == 201, r.text
     return r.json()
@@ -81,6 +101,7 @@ def _refresh(ids):
     async def run():
         async with httpx.AsyncClient() as c:
             return await eol.refresh_eol(ids, c)
+
     return asyncio.run(run())
 
 
@@ -123,8 +144,14 @@ def test_refresh_and_outputs(respx_mock, client, seeded, monkeypatch):
     assert (summ["eol_reached"], summ["eol_soon"]) == (1, 1)
 
     metrics = client.get("/metrics").text
-    assert 'changelog_watcher_app_eol_level{cycle="13",environment="producao",product="postgresql",project="postgres"} 1.0' in metrics
-    assert 'changelog_watcher_app_eol_days_left{cycle="12",environment="producao",product="postgresql",project="pg-old"} -20.0' in metrics
+    assert (
+        'changelog_watcher_app_eol_level{cycle="13",environment="producao",product="postgresql",project="postgres"} 1.0'
+        in metrics
+    )
+    assert (
+        'changelog_watcher_app_eol_days_left{cycle="12",environment="producao",product="postgresql",project="pg-old"} -20.0'
+        in metrics
+    )
     assert 'changelog_watcher_environment_apps_eol{environment="producao",status="eol"} 1.0' in metrics
 
     from changelog_watcher.db import session_scope
@@ -146,7 +173,10 @@ def test_refresh_and_outputs(respx_mock, client, seeded, monkeypatch):
 
     # a failed fetch of a different product drops the old product's cycles
     respx_mock.get(f"{API}/postgress.json").mock(return_value=httpx.Response(404))
-    client.put(f"/api/projects/{pg['id']}?refresh=false", json={**{k: p[k] for k in ("name", "repository", "source_type")}, "eol_product": "postgress"}).raise_for_status()
+    client.put(
+        f"/api/projects/{pg['id']}?refresh=false",
+        json={**{k: p[k] for k in ("name", "repository", "source_type")}, "eol_product": "postgress"},
+    ).raise_for_status()
     _refresh([pg["id"]])
     assert client.get(f"/api/projects/{pg['id']}").json()["eol_data"] is None
 

@@ -29,7 +29,7 @@ def _repo(project) -> str:
     repo = project.repository.strip()
     for prefix in ("https://github.com/", "http://github.com/", "github.com/"):
         if repo.startswith(prefix):
-            repo = repo[len(prefix):]
+            repo = repo[len(prefix) :]
     repo = repo.removesuffix(".git").strip("/")
     if repo.count("/") != 1:
         raise SourceError(_("invalid GitHub repository: '{repo}' (use owner/repo)", repo=project.repository))
@@ -52,7 +52,9 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings) -> list[R
     ]
 
 
-async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: dict | None = None) -> list[ReleaseData]:
+async def fetch_tags(
+    project, client: httpx.AsyncClient, settings, known_dates: dict | None = None
+) -> list[ReleaseData]:
     """Tags have no date in the list endpoint; we look up commit dates for the
     newest tags we don't know yet (bounded by MAX_TAG_DATE_LOOKUPS)."""
     api, repo = _api(project, settings), _repo(project)
@@ -75,12 +77,14 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, known_dates: 
     async def lookup(t: ReleaseData):
         async with sem:
             try:
-                resp = await get_json(client, f"{api}/repos/{repo}/commits/{t.commit_sha}", headers=_headers(settings, api))
+                resp = await get_json(
+                    client, f"{api}/repos/{repo}/commits/{t.commit_sha}", headers=_headers(settings, api)
+                )
                 commit = resp.json().get("commit", {})
                 t.published_at = parse_datetime(
                     (commit.get("committer") or {}).get("date") or (commit.get("author") or {}).get("date")
                 )
-            except (SourceError, httpx.HTTPError):
+            except SourceError, httpx.HTTPError:
                 pass
 
     await asyncio.gather(*(lookup(t) for t in missing))

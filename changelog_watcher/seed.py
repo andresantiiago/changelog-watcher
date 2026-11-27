@@ -78,8 +78,11 @@ def load_seed(session: Session, path: str, overwrite: bool = False) -> dict:
                 dep_data = {"version_source": "manual", "manual_version": dep_data}
             dep = existing.get(env.id)
             if dep is None:
-                dep = Deployment(project_id=project.id, environment_id=env.id,
-                                 version_source="prometheus" if project.detection_mode != "none" else "manual")
+                dep = Deployment(
+                    project_id=project.id,
+                    environment_id=env.id,
+                    version_source="prometheus" if project.detection_mode != "none" else "manual",
+                )
                 session.add(dep)
                 _apply(dep, dep_data, DEPLOYMENT_FIELDS)
             elif overwrite:

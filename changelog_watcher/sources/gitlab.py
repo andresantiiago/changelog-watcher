@@ -46,8 +46,9 @@ async def fetch_releases(project, client: httpx.AsyncClient, settings) -> list[R
 async def fetch_tags(project, client: httpx.AsyncClient, settings) -> list[ReleaseData]:
     base, path = _base(project, settings), _path(project)
     out: list[ReleaseData] = []
-    async for item in paged(client, f"{base}/api/v4/projects/{quote(path, safe='')}/repository/tags", settings,
-                            _headers(settings, base)):
+    async for item in paged(
+        client, f"{base}/api/v4/projects/{quote(path, safe='')}/repository/tags", settings, _headers(settings, base)
+    ):
         commit = item.get("commit") or {}
         release = item.get("release") or {}
         out.append(

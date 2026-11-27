@@ -120,7 +120,9 @@ def create_app() -> FastAPI:
                 return Response(status_code=401, headers={"WWW-Authenticate": "Bearer"})
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
-    class _Revalidate(StaticFiles):  # SPA has no build hash: make browsers revalidate (ETag -> 304) so UI updates apply on reload
+    class _Revalidate(
+        StaticFiles
+    ):  # SPA has no build hash: make browsers revalidate (ETag -> 304) so UI updates apply on reload
         async def get_response(self, path, scope):
             resp = await super().get_response(path, scope)
             resp.headers["Cache-Control"] = "no-cache"

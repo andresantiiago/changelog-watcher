@@ -15,11 +15,18 @@ from functools import total_ordering
 
 _PRE_KEYWORDS = "alpha|beta|rc|pre|preview|dev|snapshot|milestone|nightly|canary|a|b|m"
 _PRE_RANK = {
-    "dev": 0, "snapshot": 0, "nightly": 0, "canary": 0,
-    "alpha": 1, "a": 1,
-    "beta": 2, "b": 2,
-    "milestone": 3, "m": 3,
-    "pre": 4, "preview": 4,
+    "dev": 0,
+    "snapshot": 0,
+    "nightly": 0,
+    "canary": 0,
+    "alpha": 1,
+    "a": 1,
+    "beta": 2,
+    "b": 2,
+    "milestone": 3,
+    "m": 3,
+    "pre": 4,
+    "preview": 4,
     "rc": 5,
 }
 
@@ -118,7 +125,7 @@ def _parse(text: str | None, pattern: str | None) -> Version | None:
     pre = m.group("pre")
     pre_word = None
     if pre:
-        pre_word = re.match(r"[a-zA-Z]+", pre).group(0).lower()
+        pre_word = re.sub(r"[^a-zA-Z].*", "", pre).lower()  # pre starts with a keyword
     return Version(
         major=int(m.group("major")),
         minor=int(m.group("minor")),
@@ -208,7 +215,7 @@ def image_tag(image: str | None) -> str | None:
 
 
 def ghcr_repository(repo: str) -> str:
-    """"ghcr.io/org/app" -> "org/app" (o repositório GitHub da imagem); senão vazio."""
+    """ "ghcr.io/org/app" -> "org/app" (o repositório GitHub da imagem); senão vazio."""
     return repo.removeprefix("ghcr.io/") if repo.startswith("ghcr.io/") and repo.count("/") == 2 else ""
 
 

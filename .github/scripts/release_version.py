@@ -154,10 +154,12 @@ def write_changes() -> bool:
             continue
         any_changes = True
         start, paths = _since(tag), (*PATHS[component], *DOC_PATHS)
-        text = (f"Componente: {LABELS[component]}\n\n"
-                f"Commits desde {tag or 'o início'}:\n{_git('log', '--format=- %s%n%b', f'{start}..HEAD', '--', *paths)}\n\n"
-                f"Arquivos alterados:\n{_git('diff', '--stat', start, 'HEAD', '--', *paths)}\n\n"
-                f"Diff:\n{_git('diff', start, 'HEAD', '--', *paths)}")
+        text = (
+            f"Componente: {LABELS[component]}\n\n"
+            f"Commits desde {tag or 'o início'}:\n{_git('log', '--format=- %s%n%b', f'{start}..HEAD', '--', *paths)}\n\n"
+            f"Arquivos alterados:\n{_git('diff', '--stat', start, 'HEAD', '--', *paths)}\n\n"
+            f"Diff:\n{_git('diff', start, 'HEAD', '--', *paths)}"
+        )
         Path(f"changes-{component}.txt").write_text(text[:MAX_CHANGES])
     return any_changes
 
@@ -216,8 +218,10 @@ def main(argv: list[str]) -> None:
         result, prerelease = plan(), False
     changed_files = sync_files(result["app_version"], result["chart_version"])
     chart_tag = CHART_TAG + result["chart_version"] if result["chart_version"] else ""
-    out = (f"app_version={result['app_version']}\nchart_tag={chart_tag}\n"
-           f"changed={str(changed_files).lower()}\nprerelease={str(prerelease).lower()}\n")
+    out = (
+        f"app_version={result['app_version']}\nchart_tag={chart_tag}\n"
+        f"changed={str(changed_files).lower()}\nprerelease={str(prerelease).lower()}\n"
+    )
     for key in ("app_notes", "chart_notes"):
         eof = f"EOF_{secrets.token_hex(8)}"
         out += f"{key}<<{eof}\n{result[key]}\n{eof}\n"

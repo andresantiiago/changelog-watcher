@@ -15,13 +15,15 @@ RECORDS: deque[dict] = deque(maxlen=5000)
 class MemoryLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            RECORDS.append({
-                "created_at": datetime.fromtimestamp(record.created, UTC).isoformat(),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage()[:4000],
-                "detail": "".join(traceback.format_exception(*record.exc_info)) if record.exc_info else None,
-            })
+            RECORDS.append(
+                {
+                    "created_at": datetime.fromtimestamp(record.created, UTC).isoformat(),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage()[:4000],
+                    "detail": "".join(traceback.format_exception(*record.exc_info)) if record.exc_info else None,
+                }
+            )
         except Exception:
             self.handleError(record)
 

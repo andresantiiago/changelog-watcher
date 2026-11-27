@@ -107,8 +107,9 @@ _PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 # The app's own credentials: a placeholder must never resolve to them, or anyone able to edit
 # an environment/webhook could send them to a host of their choice.
-_APP_SECRETS = frozenset({"AUTH_USERNAME", "AUTH_PASSWORD", "GITHUB_TOKEN", "GITLAB_TOKEN", "METRICS_TOKEN",
-                          "DATABASE_URL"})
+_APP_SECRETS = frozenset(
+    {"AUTH_USERNAME", "AUTH_PASSWORD", "GITHUB_TOKEN", "GITLAB_TOKEN", "METRICS_TOKEN", "DATABASE_URL"}
+)
 
 
 def expand_env(value: str | None) -> str | None:

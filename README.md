@@ -613,7 +613,7 @@ from Prometheus itself.
 ```bash
 pytest -q
 pytest -q --cov    # tests with coverage (minimum in pyproject.toml)
-ruff check .
+ruff check . && ruff format --check . && mypy
 ```
 
 ```bash
