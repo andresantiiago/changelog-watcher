@@ -389,6 +389,7 @@ function formData(form) {
   });
   return out;
 }
+const sourceLabel = (v) => ({ prometheus: "Prometheus", kubernetes: t("Kubernetes API"), argocd: "Argo CD", flux: "Flux" })[v] || t("manual");
 const opt = (value, label, selected) => `<option value="${esc(value)}" ${String(selected) === String(value) ? "selected" : ""}>${esc(label)}</option>`;
 const field = (label, input, hint = "", cls = "") => `<label class="field ${cls}">${esc(label)}${input}${hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
 const inp = (name, value, attrs = "") => `<input name="${name}" value="${esc(value ?? "")}" ${attrs}>`;
@@ -685,7 +686,7 @@ function projectForm(p = null, isNew = !p, hint = {}) {
       ${toleranceFields(p, S.meta.tolerance)}
       <p class="small muted full" style="margin:0">${t("empty = global value (Settings page)")}</p>
     </div></fieldset>
-    <fieldset><legend>${t("Discover the version in use via Prometheus")}</legend><div class="form-grid">
+    <fieldset><legend>${t("Discover the version in use")}</legend><div class="form-grid">
       ${field(t("Detection mode"), `<select name="detection_mode">${Object.entries(S.meta.detection_modes).map(([k, v]) => opt(k, v, p.detection_mode)).join("")}</select>`, t("uses <code>kube_pod_container_info</code> from kube-state-metrics"), "full")}
       <div data-mode="workload">${field(t("Workload type"), `<select name="workload_kind">${["deployment", "statefulset", "daemonset", "cronjob"].map((k) => opt(k, k, p.workload_kind)).join("")}</select>`)}</div>
       <div data-mode="workload helm image query">${field("Namespace", inp("workload_namespace", p.workload_namespace))}</div>
@@ -693,6 +694,7 @@ function projectForm(p = null, isNew = !p, hint = {}) {
       <div data-mode="workload helm image">${field("Container", inp("container_name", p.container_name), t("optional"))}</div>
       <div data-mode="helm image" class="full">${field(t("Image"), inp("image_pattern", p.image_pattern, 'placeholder="quay.io/argoproj/argocd"'), t("image repository or regex – in Helm mode (optional) picks which image of the release sets the version"))}</div>
       <div data-mode="query" class="full">${field(t("PromQL query"), `<textarea name="promql_query" placeholder='kube_pod_container_info{namespace="{namespace}", container="app"}'>${esc(p.promql_query || "")}</textarea>`, t("the series must have the <code>image</code> (or <code>version</code>) label; {namespace} and {name} are replaced"))}</div>
+      <p data-mode="workload" class="small muted full" style="margin:0">${t("With Kubernetes API, Argo CD or Flux as the version source (Environments, below), the namespace and name point to the workload, the Argo CD Application or the Flux HelmRelease.")}</p>
       <div data-mode="workload helm image query" class="full">${field(t("Version pattern in the image tag (regex)"), inp("image_version_pattern", p.image_version_pattern), t("optional, e.g. <code>^v?(\\d+\\.\\d+\\.\\d+)</code>"))}</div>
     </div></fieldset>
     <fieldset><legend>${t("Environments")}</legend>
@@ -702,7 +704,7 @@ function projectForm(p = null, isNew = !p, hint = {}) {
         const src = d?.version_source || (p.detection_mode !== "none" && e.prometheus_url ? "prometheus" : "manual");
         return `<tr data-dep="${e.id}"><td><b>${esc(e.name)}</b>${e.prometheus_url ? "" : `<div class="small muted">${t("no Prometheus")}</div>`}</td>
           <td><input type="checkbox" data-skip="1" data-f="on" ${d || isNew ? "checked" : ""}></td>
-          <td><select data-skip="1" data-f="version_source">${opt("manual", t("Manual"), src)}${opt("prometheus", "Prometheus", src)}</select></td>
+          <td><select data-skip="1" data-f="version_source">${opt("manual", t("Manual"), src)}${opt("prometheus", "Prometheus", src)}${opt("kubernetes", t("Kubernetes API"), src)}${opt("argocd", "Argo CD", src)}${opt("flux", "Flux", src)}</select></td>
           <td><input data-skip="1" data-f="manual_version" value="${esc(d?.manual_version || "")}" placeholder="1.2.3" style="width:110px"></td>
           <td><input data-skip="1" data-f="namespace_override" value="${esc(d?.namespace_override || "")}" style="width:140px"></td>
           <td><input data-skip="1" data-f="workload_name_override" value="${esc(d?.workload_name_override || "")}" style="width:140px"></td></tr>`;
@@ -804,7 +806,7 @@ async function viewAppDetail(view, id) {
       ${mine.map((s) => `<div class="card">
         <div class="card-head"><h2>${esc(s.environment)}</h2>${badge(s.status, STATUS[s.status].label)}</div>
         <div class="row" style="align-items:baseline"><span class="small muted">${t("In use")}</span><span class="ver" style="font-size:20px;font-weight:600">${esc(s.current_version || "—")}</span><span class="small muted">${s.current_release_date ? t("published on {date}", { date: fmtDate(s.current_release_date) }) : ""}</span></div>
-        <div class="small muted" style="margin:6px 0 10px">${t("Source:")} ${s.version_source === "prometheus" ? `Prometheus${s.detected_at ? ` (${rel(s.detected_at)})` : ""}` : t("manual")}${s.detected_image ? `<br><span class="mono">${esc(s.detected_image)}</span>` : ""}</div>
+        <div class="small muted" style="margin:6px 0 10px">${t("Source:")} ${s.version_source !== "manual" ? `${sourceLabel(s.version_source)}${s.detected_at ? ` (${rel(s.detected_at)})` : ""}` : t("manual")}${s.detected_image ? `<br><span class="mono">${esc(s.detected_image)}</span>` : ""}</div>
         ${s.detection_error ? `<div class="err" data-err="${esc(s.detection_error)}" style="margin-bottom:8px">⚠ ${esc(s.detection_error)}</div>` : ""}
         <table><tbody>
           <tr><td class="muted">Bugfix</td><td>${s.latest_patch ? `${s.latest_patch_url ? `<a href="${esc(s.latest_patch_url)}" target="_blank" rel="noopener">${esc(s.latest_patch)}</a>` : esc(s.latest_patch)} <span class="small muted">(${t("{n} behind", { n: s.patch_behind })})</span>` : "—"}</td></tr>
@@ -816,7 +818,7 @@ async function viewAppDetail(view, id) {
         </tbody></table>
         <div class="row" style="margin-top:10px">
           ${s.versions_behind ? `<button class="btn sm" data-notes="${s.environment_id}" type="button">${t("See pending changelog ({n})", { n: s.versions_behind })}</button>` : ""}
-          ${p.detection_mode !== "none" ? `<button class="btn sm" data-detect="${s.environment_id}" type="button">${t("Test detection")}</button>` : ""}
+          ${p.detection_mode !== "none" || s.version_source !== "manual" ? `<button class="btn sm" data-detect="${s.environment_id}" type="button">${t("Test detection")}</button>` : ""}
         </div>
         <div data-detect-out="${s.environment_id}" class="small" style="margin-top:8px"></div>
       </div>`).join("") || `<div class="card empty">${t("This application is not deployed in any environment. Edit it to set where it runs.")}</div>`}

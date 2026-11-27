@@ -171,6 +171,25 @@ Thanos/Mimir with several clusters.
 The **Test detection** button, on the application page, shows the query and the result
 without saving anything.
 
+### Without Prometheus: Kubernetes API, Argo CD and Flux
+
+Per environment, the **Version source** of an application can also be `Kubernetes API`, `Argo CD`
+or `Flux`. They read the cluster the app itself runs in (in-cluster ServiceAccount token, read-only),
+so they need no Prometheus; the application's **detection mode** must be `workload` (to show the
+fields) and its **Namespace**/**name** (overridable per environment) point to the object:
+
+| Version source | Reads | Version |
+|---|---|---|
+| `kubernetes` | Deployment/StatefulSet/DaemonSet (**Workload type**) | tag of the image of the **Container** (optional when there is only one, or one is named like the workload) |
+| `argocd` | `Application` (`argoproj.io/v1alpha1`) | first exact version among `spec.source(s)[].targetRevision`, then `status.sync.revision(s)` |
+| `flux` | `HelmRelease` (`helm.toolkit.fluxcd.io/v2`) | chart version of the last deployed release (`status.history`), else `spec.chart.spec.version` |
+
+Ranges (`1.2.*`), branches and commits are skipped. The **Version pattern** regex also applies.
+A ServiceAccount with read-only RBAC is needed: `rbac.create=true` in the Helm chart (a ClusterRole,
+or Roles in the `rbac.namespaces` listed). Errors (not found, no permission, not in a cluster...)
+show up as the deployment's detection error, and **Test detection** works the same way. With
+NetworkPolicies enabled, also allow the egress to the API server.
+
 ### Helm releases and cluster discovery
 
 Charts that create several Deployments (Argo CD: server, repo-server, controller, redis…)
@@ -533,7 +552,7 @@ All prefixed with `changelog_watcher_`, computed from the database on each scrap
 | `app_versions_behind` | project, environment, type (`patch`/`minor`/`major`/`total`) | versions behind |
 | `app_outdated_days` | project, environment | days since the first newer version |
 | `app_libyears` | project, environment | libyears |
-| `app_detection_error` | project, environment | 1 if the Prometheus detection failed |
+| `app_detection_error` | project, environment | 1 if the version detection (Prometheus, Kubernetes API, Argo CD, Flux) failed |
 | `environment_apps` | environment, status | deployments by status |
 | `environment_apps_pending` | environment, type | deployments with an update of the type (not exclusive) |
 | `environment_up_to_date_ratio` | environment | up-to-date fraction |
@@ -578,6 +597,7 @@ end of life soon/reached, detection failure and stalled collection.
 changelog_watcher/
   sources/      release sources (github, gitlab, helm, dockerhub, changelog, web page)
   prometheus.py detection of the version in use via kube_pod_container_info
+  kube.py       detection via the Kubernetes API (workload image, Argo CD, Flux)
   versioning.py version parsing and bugfix/minor/major classification
   analysis.py   status per deployment, summaries, environment comparison
   refresh.py    pipeline: detection → releases → EOL → daily snapshot → alerts
