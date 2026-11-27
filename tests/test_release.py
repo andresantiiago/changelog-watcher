@@ -151,6 +151,30 @@ def test_chart_only_bumps_only_the_chart(repo):  # fora de release-vX.Y.Z: bugfi
     assert p["chart_notes"] == "- feat(helm): networkpolicy"  # sem Copilot: assuntos dos commits do chart
 
 
+def test_ui_only_bumps_only_the_chart(repo, capsys):  # UI vai na imagem do frontend: backend não reinicia
+    commit, git = repo
+    commit("changelog_watcher/static/app.js", "ui", "feat(ui): novo filtro")
+    p = rv.plan()
+    assert (p["app_version"], p["chart_version"]) == ("", "v0.2.1")
+    assert p["chart_notes"] == f"- feat(ui): novo filtro\n{rv.UI_NOTE}"  # avisa que depende de frontend.enabled
+    assert rv.write_changes() is True
+    assert "novo filtro" in (rv.ROOT / "changes-chart.txt").read_text()
+    assert not (rv.ROOT / "changes-app.txt").exists()
+    git("tag", "chart-v0.2.1")
+    commit("frontend/default.conf.template", "conf", "fix(frontend): cache")
+    rv.main([])
+    out = capsys.readouterr().out
+    assert "app_version=\nchart_version=v0.2.2\nchart_tag=chart-v0.2.2\n" in out
+    assert rv.UI_NOTE not in out  # a UI não mudou desde chart-v0.2.1
+    commit("changelog_watcher/api.py", "api", "fix: api")  # backend continua gerando imagem
+    p = rv.plan()
+    assert p["app_version"] == "v0.2.1"
+    # a imagem do backend leva a UI (frontend desligado): a mudança de UI entra nas notas dela
+    assert p["app_notes"] == "- fix: api\n- feat(ui): novo filtro"
+    rv.write_changes()
+    assert "novo filtro" in (rv.ROOT / "changes-app.txt").read_text()
+
+
 def test_image_change_bumps_image_and_chart_patch(repo, tmp_path, monkeypatch):
     commit, git = repo
     commit("deploy/helm/changelog-watcher/templates/np.yaml", "np", "fix(helm): x")

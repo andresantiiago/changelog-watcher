@@ -77,12 +77,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Build da imagem (sem publicar)
-        run: docker build -t changelog-watcher:ci .
-      - name: Vulnerabilidades na imagem (Trivy, HIGH/CRITICAL com correção disponível)
+      - name: Build das imagens do backend e do frontend (sem publicar)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 \
-            image --quiet --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL changelog-watcher:ci
+          docker build -t changelog-watcher:ci .
+          docker build -f frontend/Dockerfile -t changelog-watcher-frontend:ci .
+      - name: Vulnerabilidades nas imagens (Trivy, HIGH/CRITICAL com correção disponível)
+        run: |
+          for img in changelog-watcher:ci changelog-watcher-frontend:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 \
+              image --quiet --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL "$img"
+          done
 
   helm:
     runs-on: ubuntu-latest
@@ -90,7 +94,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/changelog-watcher
-      - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true --set networkPolicy.prometheus.enabled=true --set networkPolicy.internet.enabled=true > /dev/null
+      - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true --set networkPolicy.prometheus.enabled=true --set networkPolicy.internet.enabled=true --set frontend.enabled=true > /dev/null
       - name: pvc gera StatefulSet; inMemory gera Deployment; tipo inválido falha
         run: |
           helm template ci deploy/helm/changelog-watcher | grep -q "^kind: StatefulSet"
@@ -115,6 +119,13 @@ jobs:
           echo "$OUT" | grep -q 'claimName: data'
           echo "$OUT" | grep -q 'name: cw-auth, key: AUTH_PASSWORD'
           echo "$OUT" | grep -q 'secretName: cw-tls'
+          # frontend: Ingress aponta para o nginx, que o NetworkPolicy deixa chegar no backend
+          OUT=$(helm template ci $C --set frontend.enabled=true --set ingress.enabled=true \
+            --set networkPolicy.prometheus.enabled=true --set metrics.serviceMonitor.enabled=true)
+          echo "$OUT" | kc
+          helm template ci $C --set frontend.enabled=true --set ingress.enabled=true --show-only templates/ingress.yaml \
+            | grep -q 'name: ci-changelog-watcher-frontend$'
+          echo "$OUT" | grep -q '"app.kubernetes.io/name":"changelog-watcher-frontend"'
 
   kind:
     runs-on: ubuntu-latest
@@ -124,16 +135,17 @@ jobs:
       - uses: helm/kind-action@v1.15.2
         with:
           cluster_name: ci
-      - name: Imagem local carregada no kind
+      - name: Imagens locais carregadas no kind
         run: |
           docker build -t changelog-watcher:local .
-          kind load docker-image changelog-watcher:local --name ci
-      - name: Instala o chart com values-kind.yaml
+          docker build -f frontend/Dockerfile -t changelog-watcher-frontend:local .
+          kind load docker-image changelog-watcher:local changelog-watcher-frontend:local --name ci
+      - name: Instala o chart com values-kind.yaml e o frontend
         # sem ingress (o kind do CI não tem Traefik) e sem refresh na subida (não depende de rede externa)
         run: |
           helm install changelog-watcher deploy/helm/changelog-watcher -n cw --create-namespace \
             -f deploy/helm/values-kind.yaml --set ingress.enabled=false --set config.refreshOnStartup=false \
-            --wait --timeout 5m
+            --set frontend.enabled=true --wait --timeout 5m
       - name: API responde com auth e o seed foi carregado
         run: |
           PASS=$(kubectl -n cw get secret changelog-watcher-secrets -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d)
@@ -142,6 +154,19 @@ jobs:
           curl -sf http://127.0.0.1:8080/readyz
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/environments)" = 401
           curl -sf -u "admin:$PASS" http://127.0.0.1:8080/api/environments | grep -q '"name":"kind-lab"'
+      - name: UI pelo frontend (nginx), com a API pelo proxy
+        run: |
+          PASS=$(kubectl -n cw get secret changelog-watcher-secrets -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d)
+          kubectl -n cw port-forward svc/changelog-watcher-frontend 8081:80 &
+          U=http://127.0.0.1:8081
+          for _ in $(seq 30); do curl -sf $U/frontend-healthz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' $U/)" = 401
+          curl -sf -u "admin:$PASS" $U/ | grep -q '/static/app.js'
+          curl -sfI -u "admin:$PASS" $U/ | grep -qi "content-security-policy:.*script-src 'self' 'sha256-"
+          curl -sfI -u "admin:$PASS" $U/static/app.js | grep -qi 'content-security-policy'
+          test "$(curl -s -o /dev/null -w '%{http_code}' $U/metrics)" = 404  # só o ServiceMonitor, direto no backend
+          curl -sf -u "admin:$PASS" $U/api/environments | grep -q '"name":"kind-lab"'
+          curl -sf $U/readyz
       - name: Diagnóstico
         if: failure()
         run: |

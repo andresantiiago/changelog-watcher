@@ -327,8 +327,8 @@ seed:
 ```
 
 The chart creates the workload (StatefulSet or Deployment, see below), Service, Secret, the
-seed ConfigMap and, optionally, Ingress, ServiceMonitor, PrometheusRule, NetworkPolicies and the
-dashboard ConfigMap.
+seed ConfigMap and, optionally, Ingress, ServiceMonitor, PrometheusRule, NetworkPolicies, the
+dashboard ConfigMap and the [frontend](#frontend-ui-in-its-own-deployment).
 
 The UI/API requires Basic Auth by default (`auth.enabled: true`). Without `auth.password` or
 `auth.existingSecret`, the chart generates a random password in the Secret (kept across
@@ -376,6 +376,38 @@ PVC, set `persistence.existingClaim`.
 > The scheduler (refresh and report) and SQLite run inside the process, so the chart always
 > creates **1 replica**.
 
+#### Frontend (UI in its own Deployment)
+
+By default the backend serves the UI. With `frontend.enabled: true` the UI runs in its own
+Deployment (`<release>-frontend`, unprivileged nginx, image
+`ghcr.io/andresantiiago/changelog-watcher-frontend`), so a UI-only change does not restart the
+backend (scheduler and SQLite):
+
+```yaml
+frontend:
+  enabled: true
+  replicas: 1
+```
+
+- nginx serves `/` and `/static/` and proxies **every other path** (`/api`, `/docs`,
+  `/openapi.json`, `/healthz`...) to the backend Service, except `/metrics` (404: the
+  ServiceMonitor scrapes the backend directly). The Ingress points at the
+  frontend Service, and a port-forward to it is enough without an Ingress:
+  `kubectl -n changelog-watcher port-forward svc/changelog-watcher-frontend 8080:80`. The UI
+  calls the API on its own origin, so there is no CORS.
+- The UI asks for the same Basic Auth as the API: nginx checks each request against the backend
+  (`auth_request`) before serving the files.
+- Headers: `Content-Security-Policy` (UI only), `X-Content-Type-Options`, `X-Frame-Options`
+  and `Referrer-Policy: same-origin` on every response; the UI files are revalidated on every
+  load (`no-cache` + ETag, since the file names carry no hash). Probes use `/frontend-healthz`,
+  answered by nginx alone.
+- The frontend image is released with the chart: its default tag is the chart version
+  (`frontend.image.tag`), see [Versioning and releases](#versioning-and-releases). With the
+  frontend off, the UI the backend serves is the one of the backend's last release.
+- The frontend has no NetworkPolicy of its own: any pod can reach the UI/API through it (still
+  authenticated). With `networkPolicy.prometheus` on, the chart lets the frontend pods reach the
+  backend, so the ingress controller only needs to reach the frontend.
+
 ### Local kind cluster (local image)
 
 Builds the image, loads it into the kind node and installs with
@@ -392,6 +424,16 @@ kubectl -n changelog-watcher port-forward svc/changelog-watcher 8080:80   # http
 
 After changing the code: redo `docker build` and `kind load`, and restart with
 `kubectl -n changelog-watcher rollout restart deploy/changelog-watcher`.
+
+With the frontend: also build and load its image, and enable it (then port-forward
+`svc/changelog-watcher-frontend`):
+
+```bash
+docker build -f frontend/Dockerfile -t changelog-watcher-frontend:local .
+kind load docker-image changelog-watcher-frontend:local --name lab
+helm upgrade --install changelog-watcher deploy/helm/changelog-watcher \
+  -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml --set frontend.enabled=true
+```
 
 ## Language
 
@@ -588,7 +630,8 @@ changelog_watcher/
   alerts.py     immediate alerts after each refresh (major, security, delay)
   metrics.py    Prometheus collector
   api.py        REST API (FastAPI)
-  static/       frontend (HTML/JS/CSS, no build step; texts in i18n.js)
+  static/       UI (HTML/JS/CSS, no build step; texts in i18n.js)
+frontend/       nginx image serving static/ and proxying the API (optional Deployment)
 deploy/
   helm/changelog-watcher/   Helm chart
   grafana/                  Grafana dashboard
@@ -636,11 +679,16 @@ pattern:
 
 | Component | Changes when you change | Tag and release | Files updated |
 |---|---|---|---|
-| Image | `changelog_watcher/`, `Dockerfile`, `.dockerignore`, `pyproject.toml` | `vX.Y.Z` + image on GHCR | `version` in `pyproject.toml`, `appVersion` in `Chart.yaml` |
-| Helm chart | `deploy/helm/changelog-watcher/` | `chart-vX.Y.Z` | `version` in `Chart.yaml` |
+| Image | `changelog_watcher/` (`static/` alone does not count, but goes into the notes), `Dockerfile`, `.dockerignore`, `pyproject.toml` | `vX.Y.Z` + image on GHCR | `version` in `pyproject.toml`, `appVersion` in `Chart.yaml` |
+| Helm chart + frontend | `deploy/helm/changelog-watcher/`, `changelog_watcher/static/` (the UI), `frontend/` | `chart-vX.Y.Z` + frontend image `vX.Y.Z` on GHCR | `version` in `Chart.yaml` |
 
 A new image changes `appVersion` (the chart's default image), so it also produces a chart
-version: a patch, if the chart itself did not change. Documentation, tests and CI **do not
+version: a patch, if the chart itself did not change. The UI goes out with the chart, in the
+frontend image tagged with the chart version: a UI-only change produces a chart version and a
+frontend image, never a backend image, so upgrading the chart rolls only the frontend pods. The
+backend image still carries `static/` (used with `frontend.enabled: false`), as of its last
+release: the chart notes say so when the UI changed, and the next image's notes include the UI
+changes. Documentation, tests and CI **do not
 produce a version**: changes to the READMEs and `docs/` wait for the next image or chart release
 and go into its notes. The `vX.Y.Z` tags before the split applied to both; the chart starts from
 them until the first `chart-vX.Y.Z` exists.
@@ -666,14 +714,19 @@ changed since its last tag:
 3. if `pyproject.toml` or `Chart.yaml` are out of date, the workflow commits the fix
    (`chore(release): vX.Y.Z, chart-vX.Y.Z [skip ci]`);
 4. creates the tags; for the image it publishes `ghcr.io/andresantiiago/changelog-watcher` with
-   the `vX.Y.Z`, `vX.Y`, `latest` and `sha-<commit>` tags; and creates the GitHub releases with
+   the `vX.Y.Z`, `vX.Y`, `latest` and `sha-<commit>` tags; for the chart it publishes
+   `ghcr.io/andresantiiago/changelog-watcher-frontend` with the chart version (without `chart-`)
+   and `latest`; and creates the GitHub releases with
    Copilot's description (or the subjects of the component's commits since its last tag, if
    Copilot fails). The chart release is not marked as "Latest".
 
 During development, creating a `vX.Y.Z-rcN` tag (e.g. `git tag v0.2.0-rc1 && git push origin v0.2.0-rc1`)
 publishes the `vX.Y.Z-rcN` image (without touching `latest`) and a GitHub pre-release, with no
-commit on `main`. On the next merge the release comes out as `vX.Y.Z`.
+commit on `main`. On the next merge the release comes out as `vX.Y.Z`. An rc tag publishes no
+frontend image: to test an rc's UI, use `frontend.enabled: false` (the backend serves it).
 
 The chart uses `appVersion` as the image tag, so each chart version points to the latest image
 at the date of its release. The workflow uses the `GH_TOKEN` secret: a fine-grained token with
-**Contents** (write, for the commit and the tags) and **Copilot Requests**.
+**Contents** (write, for the commit and the tags) and **Copilot Requests**. The first push of
+`ghcr.io/andresantiiago/changelog-watcher-frontend` creates a private package: once, make it
+public and link it to the repository (package settings on GitHub).
