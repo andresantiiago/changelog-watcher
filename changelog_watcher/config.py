@@ -18,10 +18,10 @@ def _bool(value: str | None, default: bool = False) -> bool:
 
 
 def _limit(value: str | None, default: int) -> int | None:
-    """Empty = default, "off" = criterion disabled."""
+    """Empty = default, "off" = criterion disabled (Helm renders an unquoted `off` as "false")."""
     if value is None or value.strip() == "":
         return default
-    return None if value.strip().lower() == "off" else int(value)
+    return None if value.strip().lower() in {"off", "false", "no", "none"} else int(value)
 
 
 @dataclass
@@ -88,7 +88,7 @@ class Settings:
             log_level=e("LOG_LEVEL") or cls.log_level,
             language=e("APP_LANGUAGE") or cls.language,
             eol_enabled=_bool(e("EOL_ENABLED"), cls.eol_enabled),
-            eol_api_url=e("EOL_API_URL", cls.eol_api_url).rstrip("/"),
+            eol_api_url=(e("EOL_API_URL") or cls.eol_api_url).rstrip("/"),
             eol_warning_days=int(e("EOL_WARNING_DAYS") or cls.eol_warning_days),
             eol_auto_match=_bool(e("EOL_AUTO_MATCH"), cls.eol_auto_match),
             tolerance_days=_limit(e("TOLERANCE_DAYS"), cls.tolerance_days),

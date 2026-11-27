@@ -70,13 +70,6 @@ def _(text: str, **params) -> str:
     return text.format(**params) if params else text
 
 
-def gettext(text: str, lang: str, **params) -> str:
-    """Translate to an explicit language (e.g. labels sent to the SPA)."""
-    if normalize(lang) == "pt-BR":
-        text = _PT_BR.get(text, text)
-    return text.format(**params) if params else text
-
-
 _PT_BR: dict[str, str] = {
     # api
     "{model} {id} not found": "{model} {id} não encontrado",

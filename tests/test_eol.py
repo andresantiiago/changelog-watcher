@@ -5,6 +5,7 @@ import httpx
 import respx
 
 from changelog_watcher import eol
+from changelog_watcher.config import get_settings
 from changelog_watcher.models import Project
 from changelog_watcher.versioning import parse_version
 
@@ -84,8 +85,9 @@ def _refresh(ids):
 
 
 @respx.mock(assert_all_called=False)
-def test_refresh_and_outputs(respx_mock, client, seeded):
+def test_refresh_and_outputs(respx_mock, client, seeded, monkeypatch):
     eol._products_cache = None
+    monkeypatch.setattr(get_settings(), "eol_enabled", True)
     respx_mock.route(host="testserver").pass_through()
     respx_mock.get(f"{API}/all.json").mock(return_value=httpx.Response(200, json=["postgresql", "redis"]))
     respx_mock.get(f"{API}/postgresql.json").mock(return_value=httpx.Response(200, json=PG_CYCLES))
@@ -142,6 +144,17 @@ def test_refresh_and_outputs(respx_mock, client, seeded):
     p = client.get(f"/api/projects/{pg['id']}").json()
     assert p["eol_error"] and p["eol_data"]["product"] == "postgresql"
 
+    # a failed fetch of a different product drops the old product's cycles
+    respx_mock.get(f"{API}/postgress.json").mock(return_value=httpx.Response(404))
+    client.put(f"/api/projects/{pg['id']}?refresh=false", json={**{k: p[k] for k in ("name", "repository", "source_type")}, "eol_product": "postgress"}).raise_for_status()
+    _refresh([pg["id"]])
+    assert client.get(f"/api/projects/{pg['id']}").json()["eol_data"] is None
+
+    # EOL disabled hides data fetched before
+    monkeypatch.setattr(get_settings(), "eol_enabled", False)
+    statuses = {s["project"]: s for s in client.get(f"/api/status?environment_id={prod}").json()}
+    assert statuses["pg-old"]["eol_status"] is None
+
 
 def test_eol_product_validation(client):
     r = client.post("/api/projects?refresh=false", json={"name": "x", "repository": "o/x", "eol_product": "../etc"})
@@ -152,7 +165,6 @@ def test_eol_product_validation(client):
 
 @respx.mock(assert_all_called=False)
 def test_products_endpoint(respx_mock, client, monkeypatch):
-    from changelog_watcher.config import get_settings
 
     eol._products_cache = None
     respx_mock.route(host="testserver").pass_through()

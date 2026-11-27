@@ -12,14 +12,14 @@ import asyncio
 import logging
 import re
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 import httpx
 
 from .config import get_settings
 from .i18n import _
 from .db import session_scope
-from .models import Project, utcnow
+from .models import Project
 from .sources.base import SourceError, get_json
 from .versioning import Version
 
@@ -44,16 +44,15 @@ _products_cache: tuple[float, list[str]] | None = None
 
 
 # ------------------------------------------------------------------ fetching
-async def fetch_products(client: httpx.AsyncClient, settings=None) -> list[str]:
+async def fetch_products(client: httpx.AsyncClient, settings) -> list[str]:
     """All endoflife.date product slugs (cached for a day)."""
     global _products_cache
-    settings = settings or get_settings()
     if _products_cache and time.monotonic() - _products_cache[0] < _PRODUCTS_TTL:
         return _products_cache[1]
     data = (await get_json(client, f"{settings.eol_api_url}/all.json")).json()
     if not isinstance(data, list):
         raise SourceError(_("unexpected response from endoflife.date (product list)"))
-    products = sorted({str(p).strip().lower() for p in data if isinstance(p, str) and _SLUG.fullmatch(p.strip().lower())})
+    products = sorted({p.strip().lower() for p in data if isinstance(p, str) and _SLUG.fullmatch(p.strip().lower())})
     _products_cache = (time.monotonic(), products)
     return products
 
@@ -77,15 +76,12 @@ def normalize_cycle(item: dict) -> dict | None:
         # ISO date, True (already EOL, date unknown), False (no EOL announced) or None.
         "eol": _date_or_bool(item.get("eol")),
         "latest": str(item["latest"]) if item.get("latest") else None,
-        "release_date": _date_or_bool(item.get("releaseDate")) or None,
-        "lts": bool(item.get("lts")),
         # vendor page announcing the cycle's support/EOL; only http(s), since it becomes a link in the UI
         "link": link if isinstance(link := item.get("link"), str) and link.startswith(("https://", "http://")) else None,
     }
 
 
-async def fetch_cycles(client: httpx.AsyncClient, product: str, settings=None) -> list[dict]:
-    settings = settings or get_settings()
+async def fetch_cycles(client: httpx.AsyncClient, product: str, settings) -> list[dict]:
     if not _SLUG.fullmatch(product):
         raise SourceError(_("invalid product: {product}", product=product))
     data = (await get_json(client, f"{settings.eol_api_url}/{product}.json")).json()
@@ -172,19 +168,19 @@ def eol_status(cycle: dict, today: date, warning_days: int) -> tuple[str | None,
     return (STATUS_SOON if left <= warning_days else STATUS_OK), eol, left
 
 
-def deployment_eol(project: Project, version: Version | None, now: datetime | None = None) -> dict:
+def deployment_eol(project: Project, version: Version | None, now: datetime) -> dict:
     """EOL fields of one deployment (all None when unknown)."""
     out = {"eol_product": None, "eol_cycle": None, "eol_date": None, "eol_days_left": None, "eol_status": None,
            "eol_cycle_latest": None, "eol_link": None}
     data = project.eol_data or {}
-    if not data.get("product"):
+    if not get_settings().eol_enabled or not data.get("product"):
         return out
     out["eol_product"] = data["product"]
     out["eol_link"] = f"https://endoflife.date/{data['product']}"
     cycle = find_cycle(version, data.get("cycles") or [])
     if cycle is None:
         return out
-    today = (now or datetime.now(timezone.utc)).date()
+    today = now.date()
     status, eol_date, left = eol_status(cycle, today, get_settings().eol_warning_days)
     out.update(eol_cycle=cycle["cycle"], eol_date=eol_date, eol_days_left=left, eol_status=status,
                eol_cycle_latest=cycle.get("latest"), eol_link=cycle.get("link") or out["eol_link"])
@@ -221,7 +217,8 @@ async def refresh_eol(project_ids: list[int], client: httpx.AsyncClient) -> list
             try:
                 return p.id, {"product": product, "cycles": await fetch_cycles(client, product, settings)}, None
             except (SourceError, httpx.HTTPError, ValueError) as exc:
-                return p.id, "keep", f"{p.name}: EOL ({product}): {exc}"
+                same = (p.eol_data or {}).get("product") == product
+                return p.id, ("keep" if same else None), f"{p.name}: EOL ({product}): {exc}"
 
     results = await asyncio.gather(*(one(p) for p in projects))
     with session_scope() as s:
@@ -229,11 +226,10 @@ async def refresh_eol(project_ids: list[int], client: httpx.AsyncClient) -> list
             p = s.get(Project, pid)
             if p is None or (data == "keep" and err is None):
                 continue
-            p.eol_checked_at = utcnow()
             p.eol_error = err
+            if data != "keep":
+                p.eol_data = data
             if err:
                 errors.append(err)
                 log.warning("%s", err)
-            elif data != "keep":
-                p.eol_data = data
     return errors

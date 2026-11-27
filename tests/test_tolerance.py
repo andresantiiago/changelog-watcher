@@ -55,6 +55,8 @@ def test_tolerance_env_defaults(monkeypatch):
     monkeypatch.setenv("TOLERANCE_BUGFIXES", "0")
     s = Settings.from_env()
     assert (s.tolerance_days, s.tolerance_minors, s.tolerance_bugfixes) == (60, None, 0)
+    monkeypatch.setenv("TOLERANCE_DAYS", "false")  # Helm renders an unquoted `off` as "false"
+    assert Settings.from_env().tolerance_days is None
 
 
 def test_tolerance_counts_minor_lines():

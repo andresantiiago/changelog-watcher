@@ -300,7 +300,7 @@ function lineChart(el, series, { height = 220, yMax = null, yFmt = (v) => v, lab
     const ticks = Math.min(xs.length, Math.max(2, Math.floor((W - padL) / 90)));
     for (let i = 0; i < ticks; i++) {
       const t = t0 + (span * i) / Math.max(ticks - 1, 1);
-      svg += `<text x="${padL + ((t - t0) / span) * (W - padL - padR)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === ticks - 1 ? "end" : "middle"}">${new Date(t).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</text>`;
+      svg += `<text x="${padL + ((t - t0) / span) * (W - padL - padR)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === ticks - 1 ? "end" : "middle"}">${new Date(t).toLocaleDateString(locale(), { day: "2-digit", month: "2-digit" })}</text>`;
     }
     series.forEach((s) => {
       const pts = s.points.filter((p) => p.y != null).sort((a, b) => (a.x < b.x ? -1 : 1));
@@ -625,7 +625,7 @@ async function viewApps(view) {
       const any = S.envs.map((e) => byKey[`${p.id}:${e.id}`]).find(Boolean);
       const nss = [...new Set(S.envs.map((e) => byKey[`${p.id}:${e.id}`]?.namespace).filter(Boolean))];
       return `<tr class="clickable" data-href="#/apps/${p.id}">
-        <td><div><b>${esc(p.name)}</b> ${p.enabled ? "" : '<span class="chip">${t("disabled")}</span>'}</div>
+        <td><div><b>${esc(p.name)}</b> ${p.enabled ? "" : `<span class="chip">${t("disabled")}</span>`}</div>
           <div class="small muted">${esc(S.meta.source_types[p.source_type] || p.source_type)} · ${esc(p.repository)}</div>
           ${p.last_error ? `<div class="err" data-err="${esc(p.last_error)}" title="${t("Click to see the error")}">⚠ ${esc(p.last_error.slice(0, 80))}</div>` : ""}
           ${(p.tags || []).length ? `<div class="pill-row" style="margin-top:4px">${p.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}</td>
@@ -1043,7 +1043,7 @@ async function viewWebhooks(view) {
     <div class="filters"><span class="muted">${t("The weekly report is sent to every active webhook.")}</span><div style="flex:1"></div><button class="btn primary" id="w-new" type="button">${t("+ New webhook")}</button></div>
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>${t("Name")}</th><th>${t("Type")}</th><th>URL</th><th>${t("Environments")}</th><th>${t("Last delivery")}</th><th></th></tr></thead>
-      <tbody>${hooks.map((w) => `<tr><td><b>${esc(w.name)}</b> ${w.enabled ? "" : '<span class="chip">${t("disabled")}</span>'}${w.only_outdated ? ` <span class="chip">${t("only when something is pending")}</span>` : ""}</td>
+      <tbody>${hooks.map((w) => `<tr><td><b>${esc(w.name)}</b> ${w.enabled ? "" : `<span class="chip">${t("disabled")}</span>`}${w.only_outdated ? ` <span class="chip">${t("only when something is pending")}</span>` : ""}</td>
         <td>${esc(S.meta.webhook_kinds[w.kind] || w.kind)}</td><td class="mono small">${esc(w.url)}</td>
         <td class="small">${w.environment_ids.length ? w.environment_ids.map(envName).map(esc).join(", ") : t("all")}</td>
         <td class="small">${w.last_sent_at ? `${fmtDate(w.last_sent_at, true)}<div class="muted">${esc(w.last_status || "")}</div>` : `<span class="muted">${t("never")}</span>`}</td>

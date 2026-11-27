@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .eol import _SLUG as EOL_SLUG
 from .i18n import _
 from .sources import SOURCE_TYPES
 from .webhooks import WEBHOOK_KINDS
@@ -25,7 +26,6 @@ VersionSource = Literal["manual", "prometheus"]
 WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
 
 
-_EOL_SLUG = re.compile(r"[a-z0-9][a-z0-9._+-]*")
 
 
 def _check_regex(value: str | None) -> str | None:
@@ -114,7 +114,7 @@ class ProjectIn(BaseModel):
     @classmethod
     def _eol_product(cls, value: str | None) -> str | None:
         value = (value or "").strip().lower()
-        if value and not _EOL_SLUG.fullmatch(value):
+        if value and not EOL_SLUG.fullmatch(value):
             raise ValueError(_("invalid product: use the endoflife.date identifier, e.g. postgresql"))
         return value or None
 
@@ -126,7 +126,6 @@ class ProjectOut(ProjectIn):
     last_checked_at: datetime | None = None
     last_error: str | None = None
     eol_data: dict | None = None
-    eol_checked_at: datetime | None = None
     eol_error: str | None = None
     release_count: int = 0
     deployments: list[DeploymentOut] = Field(default_factory=list)

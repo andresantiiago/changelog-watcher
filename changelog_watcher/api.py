@@ -382,7 +382,7 @@ def history(days: int = 90, environment_id: list[int] | None = Query(None), db: 
     for snap, env_name in db.execute(stmt.order_by(Snapshot.day)):
         row = {"environment_id": snap.environment_id, "environment": env_name, "day": snap.day.isoformat(),
                **{k: getattr(snap, k) for k in SNAPSHOT_FIELDS}}
-        if row["libyears_avg"] is None:
+        if row["libyears_avg"] is None and snap.libyears:
             # Snapshots from before libyears_avg existed: approximate it from the sum.
             known = (snap.total or 0) - (snap.unknown or 0)
             if known > 0 and snap.libyears is not None:

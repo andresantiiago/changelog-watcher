@@ -294,9 +294,8 @@ def _link_projects(groups: dict, rows: list[dict], projects) -> None:
                 comp["project"] = comp["project"] or {"id": p.id, "name": p.name}
 
 
-def _main_chart(group: dict, charts: Counter) -> str | None:
+def _main_chart(name: str, charts: Counter) -> str | None:
     """The release's own chart: the one named like the release, else the most common."""
-    name = _base_name(group)
     named = [c for c in charts if (cn := _chart_name(c)) and (name == cn or name.startswith(cn + "-"))]
     if named:
         return max(named, key=len)
@@ -374,7 +373,7 @@ async def discover(environment, namespace: str | None = None, projects=()) -> li
     out = []
     for g in groups.values():
         name = _base_name({**g, "workloads": list(g["workloads"].values())})
-        g["chart"] = _main_chart({**g, "workloads": list(g["workloads"].values())}, g.pop("_charts"))
+        g["chart"] = _main_chart(name, g.pop("_charts"))
         links = sorted(v for v in g.pop("_links") if (g["namespace"], v) in known)
         if links:
             g["parent"] = links[0]

@@ -107,7 +107,7 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {c['tolerated']} | {s['total']} | {s['patch_pending']} | "
+            f"| {s['environment']} | {_pct(s['up_to_date_ratio'])} | {c.get('tolerated', 0)} | {s['total']} | {s['patch_pending']} | "
             f"{s['minor_pending']} | {s['major_pending']} | {c['unknown']} | {_libyears(s)} | "
             f"{s['avg_outdated_days']:.0f} |"
         )
