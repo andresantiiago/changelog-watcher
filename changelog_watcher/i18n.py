@@ -20,7 +20,7 @@ _current: str | None = None
 
 
 def normalize(value: str | None) -> str:
-    """"pt_BR" / "pt" / "PT-br" -> "pt-BR"; unknown values -> English."""
+    """ "pt_BR" / "pt" / "PT-br" -> "pt-BR"; unknown values -> English."""
     lang = _ALIASES.get((value or "").strip().lower())
     if lang is None and value:
         log.warning("unsupported language %r, using %s", value, DEFAULT_LANGUAGE)
@@ -82,13 +82,19 @@ _PT_BR: dict[str, str] = {
     "refresh started": "atualização iniciada",
     "enter the URL": "informe a URL",
     " (test)": " (teste)",
+    " (alerts)": " (alertas)",
+    "**🚨 Changelog Watcher: {n} alert(s)**": "**🚨 Changelog Watcher: {n} alerta(s)**",
+    "new major version": "nova versão major",
+    "release mentions a security fix": "a versão menciona correção de segurança",
+    "outdated for {n} days": "desatualizada há {n} dias",
+    "alerts to {webhook}: {detail}": "alertas para {webhook}: {detail}",
+    "alerts: {error}": "alertas: {error}",
     "invalid cron expression: {error}": "expressão cron inválida: {error}",
     "unsupported language: {value}": "idioma não suportado: {value}",
     "cross-origin request blocked": "requisição de outra origem bloqueada",
     # schemas
     "invalid regex: {error}": "regex inválida: {error}",
-    "invalid product: use the endoflife.date identifier, e.g. postgresql":
-        "produto inválido: use o identificador do endoflife.date, ex: postgresql",
+    "invalid product: use the endoflife.date identifier, e.g. postgresql": "produto inválido: use o identificador do endoflife.date, ex: postgresql",
     # refresh
     "unexpected error: {error}": "erro inesperado: {error}",
     "general failure: {error}": "falha geral: {error}",
@@ -123,14 +129,24 @@ _PT_BR: dict[str, str] = {
     "Prometheus detection disabled for this application": "detecção via Prometheus desabilitada para esta aplicação",
     "failed to query Prometheus: {error}": "falha ao consultar Prometheus: {error}",
     "Prometheus answered HTTP {status}": "Prometheus respondeu HTTP {status}",
-    "invalid response: not the Prometheus API (check the URL)":
-        "resposta inválida: não é a API do Prometheus (confira a URL)",
+    "invalid response: not the Prometheus API (check the URL)": "resposta inválida: não é a API do Prometheus (confira a URL)",
     "query error: {error}": "erro na consulta: {error}",
     "no series found for: {query}": "nenhuma série encontrada para: {query}",
     "could not extract a version from image '{image}'": "não foi possível extrair versão da imagem '{image}'",
+    # kubernetes api / argo cd / flux
+    "Kubernetes API unavailable: the app must run in a cluster with a ServiceAccount token": "API do Kubernetes indisponível: o app precisa rodar em um cluster com token de ServiceAccount",
+    "failed to query the Kubernetes API: {error}": "falha ao consultar a API do Kubernetes: {error}",
+    "{what} not found in the Kubernetes API": "{what} não encontrado na API do Kubernetes",
+    "no permission to read {what}: check the ServiceAccount's RBAC": "sem permissão para ler {what}: confira o RBAC da ServiceAccount",
+    "Kubernetes API answered HTTP {status}": "API do Kubernetes respondeu HTTP {status}",
+    "invalid response: not the Kubernetes API": "resposta inválida: não é a API do Kubernetes",
+    "container '{container}' not found in {what}": "container '{container}' não encontrado em {what}",
+    "{what} has several containers: set the container name": "{what} tem vários containers: defina o nome do container",
+    "invalid namespace or name: use a DNS-1123 name (lowercase letters, digits, '-' and '.')": "namespace ou nome inválido: use um nome DNS-1123 (letras minúsculas, dígitos, '-' e '.')",
+    "workload type '{kind}' is not supported with the Kubernetes API": "tipo de workload '{kind}' não suportado pela API do Kubernetes",
+    "could not extract a version from {what}": "não foi possível extrair versão de {what}",
     # eol
-    "unexpected response from endoflife.date (product list)":
-        "resposta inesperada do endoflife.date (lista de produtos)",
+    "unexpected response from endoflife.date (product list)": "resposta inesperada do endoflife.date (lista de produtos)",
     "invalid product: {product}": "produto inválido: {product}",
     "unexpected response from endoflife.date for {product}": "resposta inesperada do endoflife.date para {product}",
     "EOL: endoflife.date product list: {error}": "EOL: lista de produtos do endoflife.date: {error}",
@@ -208,4 +224,12 @@ _PT_BR: dict[str, str] = {
     "empty URL": "URL vazia",
     "{n} message(s) sent": "{n} mensagem(ns) enviada(s)",
     "ERROR": "ERRO",
+    # auth
+    "read-only access": "acesso somente leitura",
+    "Sign in": "Entrar",
+    "The identity provider is unavailable, try again later.": "O provedor de identidade está indisponível, tente novamente mais tarde.",
+    "Login expired or invalid, sign in again.": "Login expirado ou inválido, entre novamente.",
+    "Login failed.": "Falha no login.",
+    "Your account is not in a group allowed to use Changelog Watcher.": "Sua conta não está em um grupo com acesso ao Changelog Watcher.",
+    "You have signed out.": "Você saiu.",
 }

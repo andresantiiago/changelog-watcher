@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -18,14 +18,23 @@ from .config import get_settings
 from .i18n import _
 from .models import Report
 
-STATUS_ICON = {"up_to_date": "✅", "tolerated": "🔵", "patch": "🟡", "minor": "🟠", "major": "🔴", "unknown": "⚪", "older": "▫️"}
+STATUS_ICON = {
+    "up_to_date": "✅",
+    "tolerated": "🔵",
+    "patch": "🟡",
+    "minor": "🟠",
+    "major": "🔴",
+    "unknown": "⚪",
+    "older": "▫️",
+}
 
 
-def build_report_data(session: Session, days: int | None = None, environment_ids: list[int] | None = None,
-                      now: datetime | None = None) -> dict:
+def build_report_data(
+    session: Session, days: int | None = None, environment_ids: list[int] | None = None, now: datetime | None = None
+) -> dict:
     settings = get_settings()
     days = days or settings.report_days
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     start = now - timedelta(days=days)
     environments = [e for e in load_environments(session) if not environment_ids or e.id in environment_ids]
     statuses = compute_statuses(session, [e.id for e in environments], now=now)
@@ -38,8 +47,12 @@ def build_report_data(session: Session, days: int | None = None, environment_ids
     matrix = version_matrix(statuses)
     eol = sorted(
         (s.to_dict() for s in statuses if s.eol_status in ("eol", "soon")),
-        key=lambda s: (s["eol_status"] != "eol", s["eol_days_left"] if s["eol_days_left"] is not None else -10**6,
-                       s["environment"], s["project"]),
+        key=lambda s: (
+            s["eol_status"] != "eol",
+            s["eol_days_left"] if s["eol_days_left"] is not None else -(10**6),
+            s["environment"],
+            s["project"],
+        ),
     )
     return {
         "generated_at": now.isoformat(),
@@ -101,8 +114,20 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
 
     lines.append("## " + _("Summary by environment"))
     lines.append("")
-    lines.append(_row(_("Environment"), _("Up to date"), _("Within tolerance"), _("Apps"), _("With bugfix pending"), _("With minor pending"),
-                      _("With major pending"), _("No version"), _("Libyears (average)"), _("Average delay (days)")))
+    lines.append(
+        _row(
+            _("Environment"),
+            _("Up to date"),
+            _("Within tolerance"),
+            _("Apps"),
+            _("With bugfix pending"),
+            _("With minor pending"),
+            _("With major pending"),
+            _("No version"),
+            _("Libyears (average)"),
+            _("Average delay (days)"),
+        )
+    )
     lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for s in data["summaries"]:
         c = s["counts"]
@@ -122,7 +147,9 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
         icon = STATUS_ICON.get(r["level"], "•")
         link = f"[{r['tag']}]({r['url']})" if r.get("url") else r["tag"]
         deployed = ", ".join(f"{env}: {v or '?'}" for env, v in r["deployed"].items()) or _("not deployed")
-        lines.append(f"- {icon} **{r['project']}** {link} — {r['published_at'][:10] if r['published_at'] else ''} ({deployed})")
+        lines.append(
+            f"- {icon} **{r['project']}** {link} — {r['published_at'][:10] if r['published_at'] else ''} ({deployed})"
+        )
     if len(releases) > max_releases:
         lines.append(_("- … and {n} more", n=len(releases) - max_releases))
     lines.append("")
@@ -151,8 +178,10 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
         lines.append(_row(_("Environment"), _("Application"), _("In use"), _("Cycle"), _("End of life")))
         lines.append("|---|---|---|---|---|")
         for o in eol[:max_outdated]:
-            lines.append(f"| {o['environment']} | {EOL_ICON[o['eol_status']]} {o['project']} | {o['current_version']} | "
-                         f"{o['eol_product']} {o['eol_cycle']} | {eol_when(o)} |")
+            lines.append(
+                f"| {o['environment']} | {EOL_ICON[o['eol_status']]} {o['project']} | {o['current_version']} | "
+                f"{o['eol_product']} {o['eol_cycle']} | {eol_when(o)} |"
+            )
         if len(eol) > max_outdated:
             lines.append("\n" + _("_… and {n} more_", n=len(eol) - max_outdated))
         lines.append("")
@@ -182,8 +211,9 @@ def render_markdown(data: dict, max_releases: int = 30, max_outdated: int = 60) 
     return "\n".join(lines).strip() + "\n"
 
 
-def create_report(session: Session, trigger: str = "manual", days: int | None = None,
-                  environment_ids: list[int] | None = None) -> Report:
+def create_report(
+    session: Session, trigger: str = "manual", days: int | None = None, environment_ids: list[int] | None = None
+) -> Report:
     data = build_report_data(session, days=days, environment_ids=environment_ids)
     report = Report(
         trigger=trigger,

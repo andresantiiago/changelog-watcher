@@ -38,8 +38,10 @@ def test_tolerance_global_and_per_project(client, seeded):
     assert _status(client, "app-b")["status"] == "tolerated"
 
     pid = seeded["app_b"]["id"]  # the project's own limit wins over the global one
-    body = {**{k: client.get(f"/api/projects/{pid}").json()[k] for k in ("name", "repository", "source_type")},
-            "tolerance_days": 5}
+    body = {
+        **{k: client.get(f"/api/projects/{pid}").json()[k] for k in ("name", "repository", "source_type")},
+        "tolerance_days": 5,
+    }
     assert client.put(f"/api/projects/{pid}?refresh=false", json=body).status_code == 200
     assert _status(client, "app-b")["status"] == "patch"
     assert client.put("/api/settings", json={**sched, "tolerance_days": -1}).status_code == 422

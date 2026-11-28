@@ -3,10 +3,20 @@
 #   kind load docker-image changelog-watcher:local --name lab
 #   helm upgrade --install changelog-watcher deploy/helm/changelog-watcher -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml
 #   kubectl -n traefik port-forward svc/traefik 8000:80   # http://changelog-watcher.localhost:8000
+# With the frontend (UI on nginx), also:
+#   docker build -f frontend/Dockerfile -t changelog-watcher-frontend:local .
+#   kind load docker-image changelog-watcher-frontend:local --name lab
+#   and add --set frontend.enabled=true to the helm command.
 image:
   repository: changelog-watcher
   tag: local
   pullPolicy: Never          # the image was loaded into the node with `kind load`
+
+frontend:
+  image:
+    repository: changelog-watcher-frontend
+    tag: local
+    pullPolicy: Never
 
 # In-memory database: data is lost on every pod restart (the seed below recreates the state).
 persistence:

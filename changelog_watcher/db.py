@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -79,7 +79,9 @@ def _add_missing_columns(engine) -> None:
                 ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col.type.compile(engine.dialect)}'
                 default = col.default.arg if col.default is not None and col.default.is_scalar else None
                 if default is not None:  # literal rendered by the dialect (e.g. booleans as 1/0)
-                    sql = literal(default, col.type).compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
+                    sql = literal(default, col.type).compile(
+                        dialect=engine.dialect, compile_kwargs={"literal_binds": True}
+                    )
                     ddl += f" DEFAULT {sql}"
                 conn.execute(text(ddl))
                 log.info("added column %s.%s", table.name, col.name)

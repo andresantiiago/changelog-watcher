@@ -20,17 +20,28 @@ from .versioning import ghcr_repository, image_repository, image_tag
 
 log = logging.getLogger(__name__)
 
-_MANIFEST_TYPES = ", ".join((
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.docker.distribution.manifest.list.v2+json",
-    "application/vnd.oci.image.manifest.v1+json",
-    "application/vnd.docker.distribution.manifest.v2+json",
-))
+_MANIFEST_TYPES = ", ".join(
+    (
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    )
+)
 _REPO_URL = re.compile(r"^https?://(github\.com|gitlab\.com)/([\w.-]+(?:/[\w.-]+)+)$")
 # ponytail: só registries públicos, para a API não servir de proxy para a rede interna (SSRF);
 # uma setting com registries extras se registries privados com acesso anônimo fizerem falta.
-_REGISTRIES = {"registry-1.docker.io", "ghcr.io", "quay.io", "gcr.io", "registry.k8s.io", "public.ecr.aws",
-               "mcr.microsoft.com", "registry.gitlab.com", "docker.elastic.co"}
+_REGISTRIES = {
+    "registry-1.docker.io",
+    "ghcr.io",
+    "quay.io",
+    "gcr.io",
+    "registry.k8s.io",
+    "public.ecr.aws",
+    "mcr.microsoft.com",
+    "registry.gitlab.com",
+    "docker.elastic.co",
+}
 _LOOKUP_TIMEOUT = 15.0  # s por consulta (a da imagem faz até 5 requisições em sequência)
 _MIN_STARS = 50  # busca no GitHub: abaixo disso é quase sempre repositório pessoal de mesmo nome
 _MIN_PULLS = 100_000  # imagem do Docker Hub candidata a original de um mirror interno
@@ -57,7 +68,7 @@ def chart_name(chart: str | None) -> str | None:
 
 
 def _registry(image: str) -> tuple[str, str]:
-    """"nginx" -> ("registry-1.docker.io", "library/nginx"); "quay.io/org/app" -> ("quay.io", "org/app")."""
+    """ "nginx" -> ("registry-1.docker.io", "library/nginx"); "quay.io/org/app" -> ("quay.io", "org/app")."""
     repo = image_repository(image) or ""
     first, _, rest = repo.partition("/")
     if not rest or ("." not in first and ":" not in first and first != "localhost"):
@@ -85,7 +96,9 @@ async def _image_labels(client: httpx.AsyncClient, image: str) -> dict:
             params = dict(re.findall(r'(\w+)="([^"]*)"', resp.headers.get("www-authenticate", "")))
             realm = urlsplit(params.pop("realm", ""))
             realm_host = realm.hostname or ""
-            if realm.scheme == "https" and (realm_host == domain or realm_host.endswith(f".{domain}")):  # token só no domínio do registry
+            if realm.scheme == "https" and (
+                realm_host == domain or realm_host.endswith(f".{domain}")
+            ):  # token só no domínio do registry
                 token = await client.get(realm.geturl(), params=params)
                 if token.is_success:
                     headers["Authorization"] = f"Bearer {token.json().get('token') or token.json().get('access_token')}"
@@ -133,11 +146,15 @@ async def _public_refs(client: httpx.AsyncClient, image: str) -> list[str]:
         if p in _REGISTRIES or p == "docker.io":
             return ["/".join(parts[i:]) + ref]
     refs = [f"{h}/{'/'.join(parts[-2:])}{ref}" for h in ("ghcr.io", "docker.io")] if len(parts) > 1 else []
-    resp = await get_json(client, "https://hub.docker.com/v2/search/repositories/",
-                          params={"query": parts[-1], "page_size": 25})
-    hits = [r for r in resp.json().get("results", [])
-            if r["repo_name"].rsplit("/", 1)[-1] == parts[-1]
-            and (r.get("is_official") or (r.get("pull_count") or 0) >= _MIN_PULLS)]  # sem imagens pessoais
+    resp = await get_json(
+        client, "https://hub.docker.com/v2/search/repositories/", params={"query": parts[-1], "page_size": 25}
+    )
+    hits = [
+        r
+        for r in resp.json().get("results", [])
+        if r["repo_name"].rsplit("/", 1)[-1] == parts[-1]
+        and (r.get("is_official") or (r.get("pull_count") or 0) >= _MIN_PULLS)
+    ]  # sem imagens pessoais
     hits.sort(key=lambda r: (bool(r.get("is_official")), r.get("pull_count") or 0), reverse=True)
     refs += [r["repo_name"] + ref for r in hits[:2]]
     return list(dict.fromkeys(refs))
@@ -153,37 +170,66 @@ async def _mirror_source(client: httpx.AsyncClient, image: str) -> list[dict]:
         out = _source_label(labels, _("label of the equivalent public image {ref}", ref=ref))
         host, path = _registry(ref)
         if host == "registry-1.docker.io":
-            out.append(_candidate("dockerhub", path.removeprefix("library/"), _("equivalent public image {ref}", ref=ref)))
+            out.append(
+                _candidate("dockerhub", path.removeprefix("library/"), _("equivalent public image {ref}", ref=ref))
+            )
         return out
     return []
 
 
 async def _artifacthub(client: httpx.AsyncClient, chart: str) -> list[dict]:
     """Helm repositories publishing a chart with exactly this name, most trusted first."""
-    resp = await get_json(client, "https://artifacthub.io/api/v1/packages/search",
-                          params={"ts_query_web": chart, "kind": 0, "limit": 20})
-    hits = [p for p in resp.json().get("packages", [])
-            if p.get("name") == chart and p["repository"]["url"].startswith("http")  # helm_index lê index.yaml via HTTP
-            and (p["repository"].get("official") or (p.get("stars") or 0) >= 5)]  # "verificado" só diz que o dono é o dono
-    hits.sort(key=lambda p: (bool(p["repository"].get("official")), bool(p["repository"].get("verified_publisher")),
-                             p.get("stars") or 0), reverse=True)
-    return [_candidate("helm_index", p["repository"]["url"], f"Artifact Hub ({p['repository']['name']}, ★ {p.get('stars') or 0})",
-                       chart_name=chart, use_app_version=True) for p in hits[:2]]
+    resp = await get_json(
+        client, "https://artifacthub.io/api/v1/packages/search", params={"ts_query_web": chart, "kind": 0, "limit": 20}
+    )
+    hits = [
+        p
+        for p in resp.json().get("packages", [])
+        if p.get("name") == chart
+        and p["repository"]["url"].startswith("http")  # helm_index lê index.yaml via HTTP
+        and (p["repository"].get("official") or (p.get("stars") or 0) >= 5)
+    ]  # "verificado" só diz que o dono é o dono
+    hits.sort(
+        key=lambda p: (
+            bool(p["repository"].get("official")),
+            bool(p["repository"].get("verified_publisher")),
+            p.get("stars") or 0,
+        ),
+        reverse=True,
+    )
+    return [
+        _candidate(
+            "helm_index",
+            p["repository"]["url"],
+            f"Artifact Hub ({p['repository']['name']}, ★ {p.get('stars') or 0})",
+            chart_name=chart,
+            use_app_version=True,
+        )
+        for p in hits[:2]
+    ]
 
 
 async def _github_search(client: httpx.AsyncClient, settings, term: str) -> list[dict]:
-    resp = await get_json(client, "https://api.github.com/search/repositories", headers=github_headers(settings, "https://api.github.com"),
-                          params={"q": f"{term} in:name", "sort": "stars", "order": "desc", "per_page": 20})
+    resp = await get_json(
+        client,
+        "https://api.github.com/search/repositories",
+        headers=github_headers(settings, "https://api.github.com"),
+        params={"q": f"{term} in:name", "sort": "stars", "order": "desc", "per_page": 20},
+    )
     # Only repos named exactly like the term (argocd ~ argo-cd): the rest is noise.
     norm = lambda s: re.sub(r"[-_.]", "", s.lower())  # noqa: E731
-    hits = [r for r in resp.json().get("items", [])
-            if norm(r["name"]) == norm(term) and r["stargazers_count"] >= _MIN_STARS]
-    return [_candidate("github_releases", r["full_name"], _("GitHub search (★ {stars})", stars=r["stargazers_count"]))
-            for r in hits[:3]]
+    hits = [
+        r for r in resp.json().get("items", []) if norm(r["name"]) == norm(term) and r["stargazers_count"] >= _MIN_STARS
+    ]
+    return [
+        _candidate("github_releases", r["full_name"], _("GitHub search (★ {stars})", stars=r["stargazers_count"]))
+        for r in hits[:3]
+    ]
 
 
-async def suggest_sources(client: httpx.AsyncClient, settings, name: str | None = None,
-                          image: str | None = None, chart: str | None = None) -> list[dict]:
+async def suggest_sources(
+    client: httpx.AsyncClient, settings, name: str | None = None, image: str | None = None, chart: str | None = None
+) -> list[dict]:
     image = (image or "").strip() or None
     if image and not re.fullmatch(r"[\w.:/@+-]+", image):
         image = None  # image_pattern may be a regex: nothing to look up
@@ -205,12 +251,15 @@ async def suggest_sources(client: httpx.AsyncClient, settings, name: str | None 
             log.warning("source suggestion: lookup failed: %r", r)
     results = [r if isinstance(r, list) else [] for r in results]
     k, n = (2 if image else 0), len(terms)
-    images, charts, repos = results[:k], results[k:k + n], results[k + n:]
+    images, charts, repos = results[:k], results[k : k + n], results[k + n :]
     gh = ghcr_repository(repo or "")
     ghcr = [_candidate("github_releases", gh, _("image on ghcr.io"))] if gh else []
     host, path = _registry(image) if image else ("", "")
-    hub = [_candidate("dockerhub", path.removeprefix("library/"), _("image on Docker Hub"))] \
-        if host == "registry-1.docker.io" else []
+    hub = (
+        [_candidate("dockerhub", path.removeprefix("library/"), _("image on Docker Hub"))]
+        if host == "registry-1.docker.io"
+        else []
+    )
 
     # Most reliable first: the image's own label (or its public equivalent's), then registry/chart
     # hints, GitHub search last.

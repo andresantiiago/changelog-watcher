@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
@@ -20,12 +20,12 @@ from .db import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def aware(dt: datetime | None) -> datetime | None:
     """Naive datetimes (SQLite, date-only strings) are UTC."""
-    return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 class Environment(Base):
@@ -47,9 +47,7 @@ class Environment(Base):
     prometheus_extra_selector: Mapped[str | None] = mapped_column(String(500), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    deployments: Mapped[list["Deployment"]] = relationship(
-        back_populates="environment", cascade="all, delete-orphan"
-    )
+    deployments: Mapped[list[Deployment]] = relationship(back_populates="environment", cascade="all, delete-orphan")
 
 
 class Project(Base):
@@ -63,8 +61,12 @@ class Project(Base):
 
     # Where releases / changelog come from.
     source_type: Mapped[str] = mapped_column(String(40), default="github_releases")
-    repository: Mapped[str] = mapped_column(String(500))  # owner/repo, gitlab path, helm repo URL, docker image, changelog URL
-    source_url: Mapped[str | None] = mapped_column(String(500), default=None)  # custom API base (GHE / self-hosted GitLab)
+    repository: Mapped[str] = mapped_column(
+        String(500)
+    )  # owner/repo, gitlab path, helm repo URL, docker image, changelog URL
+    source_url: Mapped[str | None] = mapped_column(
+        String(500), default=None
+    )  # custom API base (GHE / self-hosted GitLab)
     chart_name: Mapped[str | None] = mapped_column(String(200), default=None)  # helm_index
     use_app_version: Mapped[bool] = mapped_column(Boolean, default=False)  # helm_index: compare appVersion
     tag_pattern: Mapped[str | None] = mapped_column(String(300), default=None)
@@ -97,12 +99,8 @@ class Project(Base):
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    releases: Mapped[list["Release"]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
-    deployments: Mapped[list["Deployment"]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
+    releases: Mapped[list[Release]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    deployments: Mapped[list[Deployment]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
 class Release(Base):
@@ -132,7 +130,7 @@ class Deployment(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     environment_id: Mapped[int] = mapped_column(ForeignKey("environments.id", ondelete="CASCADE"), index=True)
-    version_source: Mapped[str] = mapped_column(String(20), default="manual")  # manual|prometheus
+    version_source: Mapped[str] = mapped_column(String(20), default="manual")  # manual|prometheus|k8s...
     manual_version: Mapped[str | None] = mapped_column(String(100), default=None)
     namespace_override: Mapped[str | None] = mapped_column(String(200), default=None)
     workload_name_override: Mapped[str | None] = mapped_column(String(200), default=None)
@@ -148,7 +146,7 @@ class Deployment(Base):
 
     @property
     def current_version(self) -> str | None:
-        if self.version_source == "prometheus":
+        if self.version_source != "manual":
             return self.detected_version or self.manual_version
         return self.manual_version
 
@@ -179,8 +177,21 @@ class Snapshot(Base):
 
 
 # Summary metrics stored per snapshot (the keys of analysis.summarize / its "counts").
-SNAPSHOT_FIELDS = ("total", "up_to_date", "tolerated", "patch", "minor", "major", "unknown", "up_to_date_ratio", "libyears",
-                   "libyears_avg", "avg_outdated_days", "max_outdated_days", "versions_behind")
+SNAPSHOT_FIELDS = (
+    "total",
+    "up_to_date",
+    "tolerated",
+    "patch",
+    "minor",
+    "major",
+    "unknown",
+    "up_to_date_ratio",
+    "libyears",
+    "libyears_avg",
+    "avg_outdated_days",
+    "max_outdated_days",
+    "versions_behind",
+)
 
 
 class Webhook(Base):
@@ -193,9 +204,30 @@ class Webhook(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     only_outdated: Mapped[bool] = mapped_column(Boolean, default=False)
     environment_ids: Mapped[list] = mapped_column(JSON, default=list)  # empty = all
+    # Immediate alerts after each refresh (alerts.py), all off by default.
+    alert_major: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_security: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_overdue_days: Mapped[int | None] = mapped_column(Integer, default=None)
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_status: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AlertSent(Base):
+    """An alert already delivered: each rule fires once per webhook, deployment and version."""
+
+    __tablename__ = "alerts_sent"
+    __table_args__ = (
+        UniqueConstraint("webhook_id", "project_id", "environment_id", "rule", "version", name="uq_alert_sent"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    webhook_id: Mapped[int] = mapped_column(ForeignKey("webhooks.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    environment_id: Mapped[int] = mapped_column(ForeignKey("environments.id", ondelete="CASCADE"))
+    rule: Mapped[str] = mapped_column(String(20))  # major|security|overdue
+    version: Mapped[str] = mapped_column(String(100))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Report(Base):

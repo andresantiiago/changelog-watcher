@@ -56,7 +56,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, hints: list[s
     out: dict[str, ReleaseData] = {}
     url: str | None = f"{HUB}/repositories/{repo}/tags"
     params: dict | None = {"page_size": 100, "ordering": "last_updated"}
-    for _ in range(settings.max_release_pages):
+    for _page_n in range(settings.max_release_pages):
         if not url:
             break
         url = await _page(client, url, params, project, repo, out)
@@ -70,10 +70,10 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, hints: list[s
             lines.add(f"{v.major}." if project.version_scheme == "major_patch" else f"{v.major}.{v.minor}")
     for line in sorted(lines):
         url, params = f"{HUB}/repositories/{repo}/tags", {"page_size": 100, "ordering": "last_updated", "name": line}
-        for _ in range(settings.max_release_pages):
+        for _page_n in range(settings.max_release_pages):
             try:
                 url = await _page(client, url, params, project, repo, out)
-            except (SourceError, httpx.HTTPError):
+            except SourceError, httpx.HTTPError:
                 break
             params = None
             if not url:
@@ -87,6 +87,7 @@ async def fetch_tags(project, client: httpx.AsyncClient, settings, hints: list[s
         if v and not _TWO_PARTS.match(name):
             full_lines.add((v.major, v.minor))
     return [
-        r for name, r in out.items()
+        r
+        for name, r in out.items()
         if not ((m := _TWO_PARTS.match(name)) and (int(m.group(1)), int(m.group(2))) in full_lines)
     ]

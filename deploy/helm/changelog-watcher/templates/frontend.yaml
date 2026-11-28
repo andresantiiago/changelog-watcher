@@ -1,0 +1,70 @@
+{{- if .Values.frontend.enabled }}
+{{- /* The UI on nginx (frontend/ in the repository): serves / and /static/ and proxies everything
+       else to the backend Service. Its image is released with the chart (tag = chart version), so a
+       UI-only release rolls these pods and leaves the backend (scheduler, SQLite) running. */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cw.fullname" . }}-frontend
+  labels: {{- include "cw.frontendLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels: {{- include "cw.frontendSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cw.frontendSelectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: BACKEND_URL
+              value: "http://{{ include "cw.fullname" . }}:{{ .Values.service.port }}"
+          readinessProbe:
+            httpGet: {path: /frontend-healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /frontend-healthz, port: http}
+            periodSeconds: 20
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          volumeMounts:  # read-only root: nginx writes its pid/temp files and rendered config here
+            - name: tmp
+              mountPath: /tmp
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: conf
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cw.fullname" . }}-frontend
+  labels: {{- include "cw.frontendLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "cw.frontendSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+{{- end }}

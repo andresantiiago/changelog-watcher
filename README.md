@@ -28,7 +28,7 @@ running in each environment and tells you what needs updating.
 - **End of life (EOL)** of the cycle in use, looked up on [endoflife.date](https://endoflife.date),
   with a warning when it gets close (90 days by default).
 - **Weekly report** sent by webhook (Slack, Microsoft Teams, Discord, Google Chat or
-  generic JSON).
+  generic JSON), plus **immediate alerts** for a new major, a security fix or a long delay.
 - **Prometheus metrics** on `/metrics`, a **Grafana dashboard** and a **Helm chart**
   included.
 - Interface, reports and webhooks in **English** (default) or **Portuguese** (see
@@ -171,6 +171,27 @@ Thanos/Mimir with several clusters.
 The **Test detection** button, on the application page, shows the query and the result
 without saving anything.
 
+### Without Prometheus: Kubernetes API, Argo CD and Flux
+
+Per environment, the **Version source** of an application can also be `Kubernetes API`, `Argo CD`
+or `Flux`. They read the cluster the app itself runs in (in-cluster ServiceAccount token, read-only),
+so they need no Prometheus; the application's **detection mode** must be `workload` (to show the
+fields) and its **Namespace**/**name** (overridable per environment) point to the object:
+
+| Version source | Reads | Version |
+|---|---|---|
+| `kubernetes` | Deployment/StatefulSet/DaemonSet (**Workload type**) | tag of the image of the **Container** (optional when there is only one, or one is named like the workload) |
+| `argocd` | `Application` (`argoproj.io/v1alpha1`) | first exact version among `spec.source(s)[].targetRevision`, then `status.sync.revision(s)` |
+| `flux` | `HelmRelease` (`helm.toolkit.fluxcd.io/v2`) | chart version of the last deployed release (`status.history`), else `spec.chart.spec.version` |
+
+Ranges (`1.2.*`), branches and commits are skipped. The **Version pattern** regex also applies.
+A ServiceAccount with read-only RBAC is needed: `rbac.create=true` in the Helm chart (a ClusterRole,
+or Roles in the `rbac.namespaces` listed). Prefer listing the namespaces: the ClusterRole lets the
+pod read workload specs and Argo CD/Flux Helm values in every namespace, and those often hold
+plain-text secrets. Errors (not found, no permission, not in a cluster...) show up as the
+deployment's detection error, and **Test detection** works the same way. With NetworkPolicies
+enabled, also allow the egress to the API server.
+
 ### Helm releases and cluster discovery
 
 Charts that create several Deployments (Argo CD: server, repo-server, controller, redis…)
@@ -241,6 +262,8 @@ API limit), fewer suggestions show up, and the failure goes to the logs (WARNING
 ## Running
 
 ### Locally
+
+Requires Python 3.15+.
 
 ```bash
 pip install -e ".[dev]"
@@ -325,13 +348,46 @@ seed:
 ```
 
 The chart creates the workload (StatefulSet or Deployment, see below), Service, Secret, the
-seed ConfigMap and, optionally, Ingress, ServiceMonitor, PrometheusRule, NetworkPolicies and the
-dashboard ConfigMap.
+seed ConfigMap and, optionally, Ingress, ServiceMonitor, PrometheusRule, NetworkPolicies, the
+dashboard ConfigMap and the [frontend](#frontend-ui-in-its-own-deployment).
 
 The UI/API requires Basic Auth by default (`auth.enabled: true`). Without `auth.password` or
 `auth.existingSecret`, the chart generates a random password in the Secret (kept across
 upgrades); the command to read it shows up in the `helm install` notes. Use TLS on the Ingress
-(`ingress.tls`): the password goes in every request.
+(`ingress.tls`, `ingress.ingressRoute.tls` or the Gateway's HTTPS listener): the password goes in
+every request. For SSO, see [SSO login (OIDC / Dex)](#sso-login-oidc--dex) (`auth.oidc`).
+
+#### Ingress, IngressRoute or HTTPRoute
+
+`ingress.type` picks how the UI is exposed (with `ingress.enabled: true`); `ingress.hosts`
+(`Prefix` or `Exact` paths) and `ingress.annotations` apply to all three:
+
+| `ingress.type` | Resource | Specific values |
+|---|---|---|
+| `ingress` (default) | `networking.k8s.io/v1` Ingress | `ingress.className`, `ingress.tls` |
+| `ingressroute` | Traefik `traefik.io/v1alpha1` IngressRoute | `ingress.ingressRoute.entryPoints`, `.middlewares`, `.tls` (e.g. `{secretName: cw-tls}` or `{certResolver: letsencrypt}`) |
+| `httproute` | Gateway API `gateway.networking.k8s.io/v1` HTTPRoute | `ingress.httpRoute.parentRefs` (required; TLS is set on the Gateway listener) |
+
+```yaml
+ingress:
+  enabled: true
+  type: httproute
+  hosts:
+    - host: changelog-watcher.example.com
+      paths: [{path: /, pathType: Prefix}]
+  httpRoute:
+    parentRefs: [{name: public, namespace: gateway-system, sectionName: https}]
+```
+
+- Ingress controller annotations (`traefik.ingress.kubernetes.io/*`, `cert-manager.io/*`) don't
+  apply to IngressRoute or HTTPRoute: set entry points, TLS and middlewares in
+  `ingress.ingressRoute`, and TLS on the Gateway.
+- IngressRoute: set `entryPoints` (e.g. `[websecure]`) with `tls`; empty means every Traefik entry
+  point, plain HTTP included. Traefik's `PathPrefix` is a string prefix (`/api` also matches
+  `/apiary`).
+- HTTPRoute: point `sectionName` (or `port`) at the HTTPS listener, otherwise the route also binds
+  to HTTP listeners. All paths apply to all hosts.
+- Both accept only `Prefix`/`Exact` paths, and hosts/paths can't contain backticks.
 
 #### NetworkPolicies
 
@@ -374,6 +430,38 @@ PVC, set `persistence.existingClaim`.
 > The scheduler (refresh and report) and SQLite run inside the process, so the chart always
 > creates **1 replica**.
 
+#### Frontend (UI in its own Deployment)
+
+By default the backend serves the UI. With `frontend.enabled: true` the UI runs in its own
+Deployment (`<release>-frontend`, unprivileged nginx, image
+`ghcr.io/andresantiiago/changelog-watcher-frontend`), so a UI-only change does not restart the
+backend (scheduler and SQLite):
+
+```yaml
+frontend:
+  enabled: true
+  replicas: 1
+```
+
+- nginx serves `/` and `/static/` and proxies **every other path** (`/api`, `/docs`,
+  `/openapi.json`, `/healthz`...) to the backend Service, except `/metrics` (404: the
+  ServiceMonitor scrapes the backend directly). The Ingress points at the
+  frontend Service, and a port-forward to it is enough without an Ingress:
+  `kubectl -n changelog-watcher port-forward svc/changelog-watcher-frontend 8080:80`. The UI
+  calls the API on its own origin, so there is no CORS.
+- The UI asks for the same Basic Auth as the API: nginx checks each request against the backend
+  (`auth_request`) before serving the files.
+- Headers: `Content-Security-Policy` (UI only), `X-Content-Type-Options`, `X-Frame-Options`
+  and `Referrer-Policy: same-origin` on every response; the UI files are revalidated on every
+  load (`no-cache` + ETag, since the file names carry no hash). Probes use `/frontend-healthz`,
+  answered by nginx alone.
+- The frontend image is released with the chart: its default tag is the chart version
+  (`frontend.image.tag`), see [Versioning and releases](#versioning-and-releases). With the
+  frontend off, the UI the backend serves is the one of the backend's last release.
+- The frontend has no NetworkPolicy of its own: any pod can reach the UI/API through it (still
+  authenticated). With `networkPolicy.prometheus` on, the chart lets the frontend pods reach the
+  backend, so the ingress controller only needs to reach the frontend.
+
 ### Local kind cluster (local image)
 
 Builds the image, loads it into the kind node and installs with
@@ -390,6 +478,16 @@ kubectl -n changelog-watcher port-forward svc/changelog-watcher 8080:80   # http
 
 After changing the code: redo `docker build` and `kind load`, and restart with
 `kubectl -n changelog-watcher rollout restart deploy/changelog-watcher`.
+
+With the frontend: also build and load its image, and enable it (then port-forward
+`svc/changelog-watcher-frontend`):
+
+```bash
+docker build -f frontend/Dockerfile -t changelog-watcher-frontend:local .
+kind load docker-image changelog-watcher-frontend:local --name lab
+helm upgrade --install changelog-watcher deploy/helm/changelog-watcher \
+  -n changelog-watcher --create-namespace -f deploy/helm/values-kind.yaml --set frontend.enabled=true
+```
 
 ## Language
 
@@ -440,7 +538,7 @@ networks are still allowed.
 | `REPORT_DAYS` | `7` | "new versions" window of the report |
 | `REPORT_SEND_ENABLED` | `true` | sends the scheduled report to the webhooks |
 | `TZ` | `UTC` | scheduler time zone |
-| `PUBLIC_URL` | — | link to the UI included in the report |
+| `PUBLIC_URL` | — | link to the UI included in the report; with OIDC, base of the redirect URI (required, `https` except on localhost) |
 | `APP_LANGUAGE` | `en` | interface, report and webhook language (`en` or `pt-BR`); default, editable on the Settings page |
 | `MAX_RELEASE_PAGES` | `3` | pages of 100 releases/tags fetched per source |
 | `EOL_ENABLED` | `true` | looks up the end of life (EOL) on endoflife.date on every refresh |
@@ -448,11 +546,74 @@ networks are still allowed.
 | `EOL_WARNING_DAYS` | `90` | warns "EOL soon" when at most N days are left |
 | `EOL_AUTO_MATCH` | `true` | without a product set, looks the application's name/repository up |
 | `TOLERANCE_DAYS` / `TOLERANCE_MINORS` / `TOLERANCE_BUGFIXES` | `60` / `1` / `3` | [outdated tolerance](#outdated-tolerance); `off` disables the criterion; editable on the Settings page |
-| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth on the UI/API, required (`/healthz` and `/readyz` stay open); without them the application does not start |
-| `AUTH_DISABLED` | `false` | `true` runs without authentication (local tests only) |
+| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth on the UI/API (`/healthz` and `/readyz` stay open); without them and without OIDC the application does not start |
+| `AUTH_DISABLED` | `false` | `true` runs without authentication when neither Basic Auth nor OIDC is set (local tests only) |
+| `OIDC_ISSUER_URL` | — | [SSO login](#sso-login-oidc--dex): issuer of the OIDC provider, exactly as in its discovery document (`https`); setting any `OIDC_*` enables OIDC and makes the ones below required |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | OIDC client registered in the provider |
+| `OIDC_SCOPES` | `openid email profile groups` | scopes requested, `openid` required (Dex only sends `groups` when asked) |
+| `OIDC_EDITOR_GROUPS` / `OIDC_VIEWER_GROUPS` | — | comma-separated groups (`groups` claim) that can edit / only read; at least one of them is required, users in neither get 403 |
+| `SESSION_SECRET` | — | key (≥ 32 characters) that signs the session cookie; required with OIDC |
+| `SESSION_MAX_AGE_HOURS` | `12` | session lifetime; groups are read again at the next login |
 | `METRICS_TOKEN` | — | bearer token required on `/metrics`; empty = open |
 | `SCHEDULER_ENABLED` | `true` | disables the internal scheduler |
 | `METRICS_CACHE_SECONDS` | `30` | cache of the computed metrics |
+
+### SSO login (OIDC / Dex)
+
+Besides Basic Auth, the UI can sign users in through an OIDC provider (Authorization Code with
+PKCE). Tested against [Dex](https://dexidp.io); any provider with
+`/.well-known/openid-configuration` should work.
+
+- Opening the UI without a session redirects to the provider; API calls without a session get
+  `401` (no redirect). The session is a signed cookie (`HttpOnly`, `Secure`, `SameSite=Lax`)
+  valid for `SESSION_MAX_AGE_HOURS`, so the UI must be served over HTTPS.
+- Members of `OIDC_EDITOR_GROUPS` can change everything; members of `OIDC_VIEWER_GROUPS` only
+  read (any method other than `GET`/`HEAD`/`OPTIONS` gets `403`, and the UI hides the editing
+  buttons). Anyone else is refused after the login.
+- *Sign out* (top bar) ends the local session and, if the provider publishes an
+  `end_session_endpoint`, its session too (Dex has none: only the local session ends). That
+  redirect sends `client_id`, not `id_token_hint` (providers that require it keep their session).
+- The session is a stateless signed cookie: signing out does not revoke copies already issued,
+  they last until `SESSION_MAX_AGE_HOURS`. Rotating `SESSION_SECRET` ends every session.
+- Basic Auth keeps working alongside OIDC for scripts and API clients (send the credentials
+  directly: with OIDC on there is no Basic challenge). `/healthz`, `/readyz` and `/metrics`
+  behave as before (`/metrics` only checks `METRICS_TOKEN`).
+
+Static client in the Dex config (`redirectURIs` = `PUBLIC_URL` + `/auth/callback`):
+
+```yaml
+staticClients:
+  - id: changelog-watcher
+    name: Changelog Watcher
+    secret: <long random secret>        # also in OIDC_CLIENT_SECRET
+    redirectURIs:
+      - https://changelog.example.com/auth/callback
+```
+
+Groups come from the Dex connector (e.g. GitHub `org:team`, LDAP groups); Dex's static
+passwords have no groups. With Helm, Basic Auth stays the default and `values.yaml` ships the
+`auth.oidc` block commented out: uncomment it and fill in:
+
+```yaml
+config:
+  publicUrl: https://changelog.example.com
+auth:
+  enabled: false                 # true keeps Basic Auth too (for API clients)
+  oidc:
+    enabled: true
+    issuerUrl: https://dex.example.com/dex
+    clientId: changelog-watcher
+    existingSecret: changelog-watcher-oidc   # keys OIDC_CLIENT_SECRET and SESSION_SECRET
+    editorGroups: ["my-org:platform"]
+    viewerGroups: ["my-org:developers"]
+```
+
+Without `existingSecret`, set `auth.oidc.clientSecret`; the chart then stores it in its Secret
+and generates `SESSION_SECRET` (kept across upgrades by `lookup`). With Argo CD/GitOps or
+`helm template`, `lookup` is empty and that `SESSION_SECRET` changes on every sync (logging
+everyone out): use `existingSecret`, which is also required with `secrets.create=false` or
+`secrets.existingSecret`. The pod must reach `issuerUrl`: with `networkPolicy.internet` on, an
+in-cluster Dex (private IP) is blocked.
 
 ### Creating the tokens
 
@@ -501,6 +662,24 @@ their impact on what is deployed), outdated applications with the available
 bugfix/minor/major, the end of life (EOL) section, applications without an identified version
 and differences between environments. Reports are saved and can be downloaded as Markdown.
 
+### Immediate alerts
+
+Besides the weekly report, each webhook can turn on alerts checked at the end of every refresh
+(all off by default):
+
+| Field | Alert when |
+|---|---|
+| `alert_major` | a new major version exists for what is deployed |
+| `alert_security` | a version newer than the deployed one mentions `security`, `CVE-…` or `vulnerab…` in its title or notes |
+| `alert_overdue_days` | the application is outdated (bugfix/minor/major, not within tolerance) for more than N days |
+
+Each alert is sent once per webhook, deployment (application × environment) and version: a new
+major or a newer latest version alerts again. Alerts found in the same refresh go in a single
+message; a failed delivery is retried on the next refresh. The `generic` kind receives
+`{"event": "changelog_watcher.alert", "markdown": …, "alerts": [{"rule", "project", "environment",
+"current_version", "version", "url", …}]}`. The security rule is a keyword match on the release
+notes, so it depends on the project writing them.
+
 ## Metrics
 
 All prefixed with `changelog_watcher_`, computed from the database on each scrape:
@@ -513,7 +692,7 @@ All prefixed with `changelog_watcher_`, computed from the database on each scrap
 | `app_versions_behind` | project, environment, type (`patch`/`minor`/`major`/`total`) | versions behind |
 | `app_outdated_days` | project, environment | days since the first newer version |
 | `app_libyears` | project, environment | libyears |
-| `app_detection_error` | project, environment | 1 if the Prometheus detection failed |
+| `app_detection_error` | project, environment | 1 if the version detection (Prometheus, Kubernetes API, Argo CD, Flux) failed |
 | `environment_apps` | environment, status | deployments by status |
 | `environment_apps_pending` | environment, type | deployments with an update of the type (not exclusive) |
 | `environment_up_to_date_ratio` | environment | up-to-date fraction |
@@ -558,16 +737,20 @@ end of life soon/reached, detection failure and stalled collection.
 changelog_watcher/
   sources/      release sources (github, gitlab, helm, dockerhub, changelog, web page)
   prometheus.py detection of the version in use via kube_pod_container_info
+  kube.py       detection via the Kubernetes API (workload image, Argo CD, Flux)
   versioning.py version parsing and bugfix/minor/major classification
   analysis.py   status per deployment, summaries, environment comparison
-  refresh.py    pipeline: detection → releases → EOL → daily snapshot
+  refresh.py    pipeline: detection → releases → EOL → daily snapshot → alerts
   eol.py        end of life from endoflife.date
   report.py     report (data + Markdown)
   i18n.py       language (English/Portuguese) and backend message catalog
   webhooks.py   Slack/Teams/Discord/Google Chat/generic formats
+  alerts.py     immediate alerts after each refresh (major, security, delay)
   metrics.py    Prometheus collector
+  auth.py       Basic Auth, OIDC login and session cookie
   api.py        REST API (FastAPI)
-  static/       frontend (HTML/JS/CSS, no build step; texts in i18n.js)
+  static/       UI (HTML/JS/CSS, no build step; texts in i18n.js)
+frontend/       nginx image serving static/ and proxying the API (optional Deployment)
 deploy/
   helm/changelog-watcher/   Helm chart
   grafana/                  Grafana dashboard
@@ -591,6 +774,8 @@ from Prometheus itself.
 
 ```bash
 pytest -q
+pytest -q --cov    # tests with coverage (minimum in pyproject.toml)
+ruff check . && ruff format --check . && mypy
 ```
 
 ```bash
@@ -613,11 +798,16 @@ pattern:
 
 | Component | Changes when you change | Tag and release | Files updated |
 |---|---|---|---|
-| Image | `changelog_watcher/`, `Dockerfile`, `.dockerignore`, `pyproject.toml` | `vX.Y.Z` + image on GHCR | `version` in `pyproject.toml`, `appVersion` in `Chart.yaml` |
-| Helm chart | `deploy/helm/changelog-watcher/` | `chart-vX.Y.Z` | `version` in `Chart.yaml` |
+| Image | `changelog_watcher/` (`static/` alone does not count, but goes into the notes), `Dockerfile`, `.dockerignore`, `pyproject.toml` | `vX.Y.Z` + image on GHCR | `version` in `pyproject.toml`, `appVersion` in `Chart.yaml` |
+| Helm chart + frontend | `deploy/helm/changelog-watcher/`, `changelog_watcher/static/` (the UI), `frontend/` | `chart-vX.Y.Z` + frontend image `vX.Y.Z` on GHCR | `version` in `Chart.yaml` |
 
 A new image changes `appVersion` (the chart's default image), so it also produces a chart
-version: a patch, if the chart itself did not change. Documentation, tests and CI **do not
+version: a patch, if the chart itself did not change. The UI goes out with the chart, in the
+frontend image tagged with the chart version: a UI-only change produces a chart version and a
+frontend image, never a backend image, so upgrading the chart rolls only the frontend pods. The
+backend image still carries `static/` (used with `frontend.enabled: false`), as of its last
+release: the chart notes say so when the UI changed, and the next image's notes include the UI
+changes. Documentation, tests and CI **do not
 produce a version**: changes to the READMEs and `docs/` wait for the next image or chart release
 and go into its notes. The `vX.Y.Z` tags before the split applied to both; the chart starts from
 them until the first `chart-vX.Y.Z` exists.
@@ -643,14 +833,19 @@ changed since its last tag:
 3. if `pyproject.toml` or `Chart.yaml` are out of date, the workflow commits the fix
    (`chore(release): vX.Y.Z, chart-vX.Y.Z [skip ci]`);
 4. creates the tags; for the image it publishes `ghcr.io/andresantiiago/changelog-watcher` with
-   the `vX.Y.Z`, `vX.Y`, `latest` and `sha-<commit>` tags; and creates the GitHub releases with
+   the `vX.Y.Z`, `vX.Y`, `latest` and `sha-<commit>` tags; for the chart it publishes
+   `ghcr.io/andresantiiago/changelog-watcher-frontend` with the chart version (without `chart-`)
+   and `latest`; and creates the GitHub releases with
    Copilot's description (or the subjects of the component's commits since its last tag, if
    Copilot fails). The chart release is not marked as "Latest".
 
 During development, creating a `vX.Y.Z-rcN` tag (e.g. `git tag v0.2.0-rc1 && git push origin v0.2.0-rc1`)
 publishes the `vX.Y.Z-rcN` image (without touching `latest`) and a GitHub pre-release, with no
-commit on `main`. On the next merge the release comes out as `vX.Y.Z`.
+commit on `main`. On the next merge the release comes out as `vX.Y.Z`. An rc tag publishes no
+frontend image: to test an rc's UI, use `frontend.enabled: false` (the backend serves it).
 
 The chart uses `appVersion` as the image tag, so each chart version points to the latest image
 at the date of its release. The workflow uses the `GH_TOKEN` secret: a fine-grained token with
-**Contents** (write, for the commit and the tags) and **Copilot Requests**.
+**Contents** (write, for the commit and the tags) and **Copilot Requests**. The first push of
+`ghcr.io/andresantiiago/changelog-watcher-frontend` creates a private package: once, make it
+public and link it to the repository (package settings on GitHub).

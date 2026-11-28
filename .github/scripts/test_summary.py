@@ -1,6 +1,6 @@
 """Resumo do pytest (JUnit XML) em Markdown para o $GITHUB_STEP_SUMMARY.
 
-    python3 .github/scripts/test_summary.py pytest.xml >> "$GITHUB_STEP_SUMMARY"
+python3 .github/scripts/test_summary.py pytest.xml >> "$GITHUB_STEP_SUMMARY"
 """
 
 from __future__ import annotations
@@ -25,17 +25,25 @@ def summarize(xml_text: str) -> str:
         rows.append(f"| {STATUS[kind]} | `{name}` | {float(c.get('time') or 0):.2f}s |")
         if kind in ("failure", "error"):
             detail = ((res.get("message") or "") + "\n" + (res.text or "")).strip()[-3000:]
-            problems.append(f"<details><summary>{STATUS[kind]} <code>{name}</code></summary>\n\n"
-                            f"```\n{detail}\n```\n</details>")
+            problems.append(
+                f"<details><summary>{STATUS[kind]} <code>{name}</code></summary>\n\n```\n{detail}\n```\n</details>"
+            )
     total = sum(counts.values())
-    head = ("## Testes\n\n"
-            f"**{total}** testes: ✅ {counts[None]} passaram · ❌ {counts['failure']} falharam · "
-            f"💥 {counts['error']} com erro · ⏭️ {counts['skipped']} ignorados\n")
+    head = (
+        "## Testes\n\n"
+        f"**{total}** testes: ✅ {counts[None]} passaram · ❌ {counts['failure']} falharam · "
+        f"💥 {counts['error']} com erro · ⏭️ {counts['skipped']} ignorados\n"
+    )
     parts = [head]
     if problems:
         parts += ["### Falhas\n", *problems, ""]
-    parts += ["<details><summary>Todos os testes</summary>\n",
-              "| Resultado | Teste | Tempo |", "|---|---|---|", *rows, "</details>"]
+    parts += [
+        "<details><summary>Todos os testes</summary>\n",
+        "| Resultado | Teste | Tempo |",
+        "|---|---|---|",
+        *rows,
+        "</details>",
+    ]
     return "\n".join(parts) + "\n"
 
 

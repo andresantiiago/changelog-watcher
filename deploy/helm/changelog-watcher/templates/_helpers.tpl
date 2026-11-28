@@ -27,6 +27,20 @@ app.kubernetes.io/name: {{ include "cw.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{/* Frontend: another name, so the backend's selectors (Service, NetworkPolicy, ServiceMonitor)
+     never match its pods or Service. */}}
+{{- define "cw.frontendSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "cw.name" . }}-frontend
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "cw.frontendLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
+{{ include "cw.frontendSelectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.Version | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
 {{- define "cw.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "cw.fullname" .) .Values.serviceAccount.name -}}
@@ -48,3 +62,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $l := lower (toString (.Values.config.language | default "en")) -}}
 {{- if or (eq $l "pt-br") (eq $l "pt_br") (eq $l "pt") -}}pt-BR{{- else -}}en{{- end -}}
 {{- end }}
+
+{{/* Service the Ingress/IngressRoute/HTTPRoute sends traffic to: the frontend (nginx, which
+     proxies the API to the backend) when enabled, else the backend. Both use service.port. */}}
+{{- define "cw.routeService" -}}
+{{ include "cw.fullname" . }}{{ if .Values.frontend.enabled }}-frontend{{ end }}
+{{- end -}}
+
+{{/* IngressRoute/HTTPRoute: at least one host, only Prefix/Exact paths, and no backticks (they
+     would break out of the Traefik rule, e.g. Host(`a`) || PathPrefix(`/`)). */}}
+{{- define "cw.checkRouteHosts" -}}
+{{- if not .Values.ingress.hosts }}{{ fail "ingress.hosts must not be empty" }}{{ end }}
+{{- range .Values.ingress.hosts }}
+{{- if contains "`" (toString .host) }}{{ fail "ingress.hosts: host must not contain backticks" }}{{ end }}
+{{- if not .paths }}{{ fail "ingress.hosts: each host needs paths" }}{{ end }}
+{{- range .paths }}
+{{- if contains "`" (toString .path) }}{{ fail "ingress.hosts: path must not contain backticks" }}{{ end }}
+{{- if not (has .pathType (list "Prefix" "Exact")) }}{{ fail (printf "ingress.hosts: pathType must be Prefix or Exact for %s (got %q)" $.Values.ingress.type .pathType) }}{{ end }}
+{{- end }}
+{{- end }}
+{{- end -}}

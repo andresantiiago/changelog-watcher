@@ -17,8 +17,8 @@ from datetime import date, datetime
 import httpx
 
 from .config import get_settings
-from .i18n import _
 from .db import session_scope
+from .i18n import _
 from .models import Project
 from .sources.base import SourceError, get_json
 from .versioning import Version
@@ -77,7 +77,9 @@ def normalize_cycle(item: dict) -> dict | None:
         "eol": _date_or_bool(item.get("eol")),
         "latest": str(item["latest"]) if item.get("latest") else None,
         # vendor page announcing the cycle's support/EOL; only http(s), since it becomes a link in the UI
-        "link": link if isinstance(link := item.get("link"), str) and link.startswith(("https://", "http://")) else None,
+        "link": link
+        if isinstance(link := item.get("link"), str) and link.startswith(("https://", "http://"))
+        else None,
     }
 
 
@@ -143,8 +145,11 @@ def find_cycle(version: Version | None, cycles: list[dict]) -> dict | None:
     """The release cycle of ``version``: the longest cycle (``16``, ``1.29``) that prefixes it."""
     if version is None:
         return None
-    parts = (version.major, version.patch) if version.two_part else (
-        version.major, version.minor, version.patch, version.build)
+    parts = (
+        (version.major, version.patch)
+        if version.two_part
+        else (version.major, version.minor, version.patch, version.build)
+    )
     best, best_len = None, 0
     for c in cycles:
         cp = _cycle_parts(c["cycle"])
@@ -170,8 +175,15 @@ def eol_status(cycle: dict, today: date, warning_days: int) -> tuple[str | None,
 
 def deployment_eol(project: Project, version: Version | None, now: datetime) -> dict:
     """EOL fields of one deployment (all None when unknown)."""
-    out = {"eol_product": None, "eol_cycle": None, "eol_date": None, "eol_days_left": None, "eol_status": None,
-           "eol_cycle_latest": None, "eol_link": None}
+    out = {
+        "eol_product": None,
+        "eol_cycle": None,
+        "eol_date": None,
+        "eol_days_left": None,
+        "eol_status": None,
+        "eol_cycle_latest": None,
+        "eol_link": None,
+    }
     data = project.eol_data or {}
     if not get_settings().eol_enabled or not data.get("product"):
         return out
@@ -182,8 +194,14 @@ def deployment_eol(project: Project, version: Version | None, now: datetime) -> 
         return out
     today = now.date()
     status, eol_date, left = eol_status(cycle, today, get_settings().eol_warning_days)
-    out.update(eol_cycle=cycle["cycle"], eol_date=eol_date, eol_days_left=left, eol_status=status,
-               eol_cycle_latest=cycle.get("latest"), eol_link=cycle.get("link") or out["eol_link"])
+    out.update(
+        eol_cycle=cycle["cycle"],
+        eol_date=eol_date,
+        eol_days_left=left,
+        eol_status=status,
+        eol_cycle_latest=cycle.get("latest"),
+        eol_link=cycle.get("link") or out["eol_link"],
+    )
     return out
 
 

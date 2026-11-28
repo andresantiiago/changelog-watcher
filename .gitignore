@@ -21,6 +21,9 @@ data/
 *.db-wal
 
 # Ferramentas / SO
+.claude/worktrees/
 .DS_Store
 .impeccable/
 *.sw?
+.coverage
+coverage.xml

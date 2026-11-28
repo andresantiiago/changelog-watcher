@@ -2,12 +2,14 @@
 
 Dois componentes, cada um com sua tag e só os seus arquivos:
 
-- **imagem** (``changelog_watcher/``, ``Dockerfile``, ``.dockerignore``, ``pyproject.toml``):
-  tag ``vX.Y.Z``, imagem no GHCR e release; atualiza ``version`` do pyproject.toml (PEP 440,
-  sem ``v``) e ``appVersion`` do Chart.yaml.
-- **chart** (``deploy/helm/changelog-watcher/``): tag ``chart-vX.Y.Z`` e release; atualiza
-  ``version`` do Chart.yaml. Uma nova imagem muda o ``appVersion`` (imagem padrão do chart),
-  então também gera uma versão do chart (patch, se o chart em si não mudou).
+- **imagem** (``changelog_watcher/``, ``Dockerfile``, ``.dockerignore``, ``pyproject.toml``;
+  ``static/`` sozinho não gera versão, mas entra nas notas): tag ``vX.Y.Z``, imagem no GHCR e
+  release; atualiza ``version`` do pyproject.toml (PEP 440, sem ``v``) e ``appVersion`` do Chart.yaml.
+- **chart** (``deploy/helm/changelog-watcher/``, a UI ``changelog_watcher/static/`` e
+  ``frontend/``): tag ``chart-vX.Y.Z``, release e a imagem do frontend com a versão do chart
+  (tag padrão do frontend no chart); atualiza ``version`` do Chart.yaml. Assim uma mudança só de
+  UI não gera imagem do backend nem o reinicia. Uma nova imagem muda o ``appVersion`` (imagem
+  padrão do chart), então também gera uma versão do chart (patch, se o chart em si não mudou).
 
 O resto (docs, testes, CI) não gera versão: README e ``docs/`` entram nas notas da próxima
 release. Antes da separação as tags ``vX.Y.Z`` valiam para os dois; sem nenhuma tag
@@ -28,8 +30,9 @@ Merge na main (sem argumento), para cada componente com mudanças; $HEAD_BRANCH 
 Tag de release candidate da imagem (argumento ``vX.Y.Z-rcN``): só valida e grava essa versão
 nos arquivos da imagem, para ela reportar a versão certa (sem commit).
 
-Escreve ``app_version``, ``chart_tag``, ``changed``, ``prerelease``, ``app_notes`` e
-``chart_notes`` em $GITHUB_OUTPUT (ou stdout); versão vazia = sem release. Sem notas do Copilot,
+Escreve ``app_version``, ``chart_version`` (tag da imagem do frontend), ``chart_tag``, ``changed``,
+``prerelease``, ``app_notes`` e ``chart_notes`` em $GITHUB_OUTPUT (ou stdout); versão vazia = sem
+release. Sem notas do Copilot,
 as notas são os assuntos dos commits do componente desde a sua última tag (``--generate-notes``
 partiria da release anterior por data, que pode ser a do outro componente).
 """
@@ -46,11 +49,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = ROOT / "pyproject.toml"
 CHART = ROOT / "deploy/helm/changelog-watcher/Chart.yaml"
-PATHS = {
+UI = "changelog_watcher/static"
+PATHS = {  # pathspecs do git: o que gera versão e entra nas notas
     "app": ("changelog_watcher", "Dockerfile", ".dockerignore", "pyproject.toml"),
-    "chart": ("deploy/helm/changelog-watcher",),
+    "chart": ("deploy/helm/changelog-watcher", UI, "frontend"),
 }
-LABELS = {"app": "imagem da aplicação", "chart": "chart Helm"}
+# A UI sozinha não gera imagem do backend (sai na do frontend, com o chart), mas entra nas notas
+# dela: com frontend.enabled=false é a imagem do backend que a leva.
+NO_BUMP = {"app": (f":(exclude){UI}",)}
+UI_NOTE = "- A UI muda só com frontend.enabled=true; com o frontend desligado, chega na próxima imagem do backend"
+LABELS = {"app": "imagem da aplicação", "chart": "chart Helm e imagem do frontend (UI)"}
 DOC_PATHS = ("README.md", "README.pt-BR.md", "docs")
 CHART_TAG = "chart-"
 SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -140,7 +148,8 @@ def _since(tag: str | None) -> str:
 
 
 def changed(component: str, tag: str | None) -> bool:
-    return bool(_git("diff", "--name-only", _since(tag), "HEAD", "--", *PATHS[component]))
+    paths = (*PATHS[component], *NO_BUMP.get(component, ()))
+    return bool(_git("diff", "--name-only", _since(tag), "HEAD", "--", *paths))
 
 
 def commit_log(component: str, tag: str | None, fmt: str = "%B") -> str:
@@ -154,10 +163,12 @@ def write_changes() -> bool:
             continue
         any_changes = True
         start, paths = _since(tag), (*PATHS[component], *DOC_PATHS)
-        text = (f"Componente: {LABELS[component]}\n\n"
-                f"Commits desde {tag or 'o início'}:\n{_git('log', '--format=- %s%n%b', f'{start}..HEAD', '--', *paths)}\n\n"
-                f"Arquivos alterados:\n{_git('diff', '--stat', start, 'HEAD', '--', *paths)}\n\n"
-                f"Diff:\n{_git('diff', start, 'HEAD', '--', *paths)}")
+        text = (
+            f"Componente: {LABELS[component]}\n\n"
+            f"Commits desde {tag or 'o início'}:\n{_git('log', '--format=- %s%n%b', f'{start}..HEAD', '--', *paths)}\n\n"
+            f"Arquivos alterados:\n{_git('diff', '--stat', start, 'HEAD', '--', *paths)}\n\n"
+            f"Diff:\n{_git('diff', start, 'HEAD', '--', *paths)}"
+        )
         Path(f"changes-{component}.txt").write_text(text[:MAX_CHANGES])
     return any_changes
 
@@ -189,6 +200,8 @@ def plan() -> dict[str, str]:
     chart_changed = changed("chart", tags["chart"])
     if chart_changed or out["app_version"]:
         notes = (_ai("chart") or commit_log("chart", tags["chart"], "- %s")) if chart_changed else ""
+        if _git("diff", "--name-only", _since(tags["chart"]), "HEAD", "--", UI):
+            notes = f"{notes}\n{UI_NOTE}"
         out["chart_version"] = next_version([release] if release else declared["chart"], tags["chart"])
         if out["app_version"]:
             notes = f"{notes}\n- Atualiza a imagem padrão (appVersion) para {out['app_version']}".strip()
@@ -216,8 +229,10 @@ def main(argv: list[str]) -> None:
         result, prerelease = plan(), False
     changed_files = sync_files(result["app_version"], result["chart_version"])
     chart_tag = CHART_TAG + result["chart_version"] if result["chart_version"] else ""
-    out = (f"app_version={result['app_version']}\nchart_tag={chart_tag}\n"
-           f"changed={str(changed_files).lower()}\nprerelease={str(prerelease).lower()}\n")
+    out = (
+        f"app_version={result['app_version']}\nchart_version={result['chart_version']}\nchart_tag={chart_tag}\n"
+        f"changed={str(changed_files).lower()}\nprerelease={str(prerelease).lower()}\n"
+    )
     for key in ("app_notes", "chart_notes"):
         eof = f"EOF_{secrets.token_hex(8)}"
         out += f"{key}<<{eof}\n{result[key]}\n{eof}\n"

@@ -22,10 +22,8 @@ DETECTION_MODES = {
 SourceType = Literal[tuple(SOURCE_TYPES)]  # type: ignore[valid-type]
 DetectionMode = Literal[tuple(DETECTION_MODES)]  # type: ignore[valid-type]
 WorkloadKind = Literal["deployment", "statefulset", "daemonset", "cronjob"]
-VersionSource = Literal["manual", "prometheus"]
+VersionSource = Literal["manual", "prometheus", "kubernetes", "argocd", "flux"]
 WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
-
-
 
 
 def _check_regex(value: str | None) -> str | None:
@@ -138,6 +136,9 @@ class WebhookIn(BaseModel):
     enabled: bool = True
     only_outdated: bool = False
     environment_ids: list[int] = Field(default_factory=list)
+    alert_major: bool = False
+    alert_security: bool = False
+    alert_overdue_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class WebhookOut(WebhookIn):

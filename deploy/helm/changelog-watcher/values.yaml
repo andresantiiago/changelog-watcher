@@ -14,6 +14,21 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # The API token is only mounted when needed: rbac.create, or this flag when you bring your own RBAC.
+  automountToken: false
+
+# Read-only access to the Kubernetes API of this cluster (get on Deployments, StatefulSets,
+# DaemonSets, Argo CD Applications and Flux HelmReleases), so a deployment's version source can be
+# "Kubernetes API", "Argo CD" or "Flux" instead of Prometheus. Off by default.
+# With networkPolicy on, also allow the egress to the API server (the chart does not know its address).
+rbac:
+  create: false
+  # [] = one ClusterRole: get on workloads, Applications and HelmReleases of EVERY namespace, whose
+  # specs may hold plain-text secrets (env values, inline Helm values). Prefer listing the namespaces
+  # you track: a Role + RoleBinding in each one.
+  namespaces: []
+  #  - production
+  #  - argocd
 
 podAnnotations: {}
 podLabels: {}
@@ -39,14 +54,31 @@ service:
 
 ingress:
   enabled: false
+  # ingress (networking.k8s.io Ingress, default), ingressroute (Traefik IngressRoute,
+  # traefik.io/v1alpha1) or httproute (Gateway API HTTPRoute, gateway.networking.k8s.io/v1).
+  # hosts and annotations apply to all three; className and tls only to the Ingress. Ingress
+  # controller annotations (traefik.ingress.kubernetes.io/*, cert-manager.io/*) are ignored by the
+  # other two: set entry points, TLS and middlewares in ingressRoute, and TLS on the Gateway.
+  type: ingress
   className: ""
   annotations: {}
   hosts:
     - host: changelog-watcher.local
       paths:
         - path: /
-          pathType: Prefix
+          pathType: Prefix    # Prefix or Exact
   tls: []
+  ingressRoute:
+    # Set it (e.g. [websecure]) together with tls: empty = every Traefik entry point, plain HTTP
+    # included (Basic Auth sends the password on every request).
+    entryPoints: []
+    middlewares: []         # e.g. [{name: auth-headers}]
+    tls: {}                 # e.g. {secretName: cw-tls} or {certResolver: letsencrypt}
+  httpRoute:
+    # Gateway to attach to (required); TLS is configured on the Gateway listener. Point
+    # sectionName (or port) at the HTTPS listener: without it the route also binds to HTTP ones.
+    # All paths apply to all hosts here (HTTPRoute hostnames are per route).
+    parentRefs: []          # e.g. [{name: public, namespace: gateway-system, sectionName: https}]
 
 resources:
   requests:
@@ -54,6 +86,27 @@ resources:
     memory: 128Mi
   limits:
     memory: 512Mi
+
+# Optional frontend: the UI in its own Deployment (unprivileged nginx). Its image is released
+# with the chart, so a UI-only release rolls only these pods, not the backend (scheduler, SQLite).
+# nginx serves / and /static/ (asking for the same Basic Auth as the API) and proxies everything
+# else (/api, /docs, /metrics...) to the backend Service: the Ingress and port-forward point at
+# the frontend Service (<fullname>-frontend). Off: the backend serves the UI, as before.
+# Shares imagePullSecrets, podSecurityContext, securityContext, service.type/port,
+# nodeSelector and tolerations with the backend.
+frontend:
+  enabled: false
+  image:
+    repository: ghcr.io/andresantiiago/changelog-watcher-frontend
+    tag: ""            # default: .Chart.Version
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi  # nginx starts one worker per node CPU
 
 nodeSelector: {}
 tolerations: []
@@ -125,13 +178,36 @@ secrets:
 
 # Basic auth of the UI/API (/healthz and /readyz stay open; /metrics, see metrics.token).
 # Without password or existingSecret, a random password is generated in the Secret (see the
-# release NOTES). enabled=false leaves the API open (AUTH_DISABLED=true): local tests only.
+# release NOTES). enabled=false and oidc.enabled=false leave the API open (AUTH_DISABLED=true):
+# local tests only.
 # Always serve the UI over TLS (ingress.tls): Basic Auth sends the password on every request.
 auth:
   enabled: true
   username: admin
   password: ""
   existingSecret: ""      # keys AUTH_USERNAME and AUTH_PASSWORD
+  # Default: Basic Auth (above). SSO login via OIDC (e.g. Dex) is optional: uncomment the block
+  # below. Works alongside Basic Auth (for API clients) or alone
+  # (auth.enabled=false). Requires config.publicUrl (redirect URI: <publicUrl>/auth/callback)
+  # and HTTPS. The pod must reach issuerUrl (see networkPolicy).
+  # oidc:
+  #   enabled: true
+  #   issuerUrl: ""         # e.g. https://dex.example.com/dex (exactly the provider's "issuer")
+  #   clientId: changelog-watcher
+  #   clientSecret: ""      # stored in the chart Secret as OIDC_CLIENT_SECRET
+  #   # Existing Secret with the keys OIDC_CLIENT_SECRET and SESSION_SECRET (instead of the above;
+  #   # without it, SESSION_SECRET is generated in the chart Secret and kept across upgrades via
+  #   # `lookup`). Use it with Argo CD/GitOps/`helm template`: there `lookup` is empty, so a
+  #   # generated SESSION_SECRET changes on every sync and logs everyone out. Also required with
+  #   # secrets.create=false or secrets.existingSecret.
+  #   existingSecret: ""
+  #   scopes: openid email profile groups
+  #   # Members of editorGroups can change everything; of viewerGroups, only read (other users: 403).
+  #   editorGroups: []
+  #   viewerGroups: []
+  #   # Signing out does not revoke sessions already issued (stateless cookie): they last until
+  #   # they expire; rotating SESSION_SECRET ends all of them.
+  #   sessionMaxAgeHours: 12
 
 # Initial configuration (seed) – environments, applications and webhooks.
 # Loaded on every start; by default it only creates what does not exist yet.
@@ -160,6 +236,9 @@ seed:
   #  - name: slack-platform
   #    kind: slack
   #    url: ${SLACK_WEBHOOK_URL}
+  #    alert_major: true            # immediate alerts after each refresh (off by default)
+  #    alert_security: true
+  #    alert_overdue_days: 90
 
 metrics:
   # Bearer token required on /metrics (stored in the Secret as METRICS_TOKEN; the

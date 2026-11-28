@@ -20,13 +20,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.15"
+          cache: pip
       - run: pip install -e ".[dev]"
       - name: Testes
-        run: pytest -v -rfE --junitxml=pytest.xml
+        # Cobertura mínima em pyproject.toml ([tool.coverage.report] fail_under).
+        run: pytest -v -rfE --junitxml=pytest.xml --cov --cov-report=
       - name: Resumo dos testes
         if: always()
         run: |
           python3 .github/scripts/test_summary.py pytest.xml > summary.md
+          if [ -f .coverage ]; then
+            { echo; echo "<details><summary>Cobertura: $(coverage report --format=total)%</summary>"; echo
+              coverage report --format=markdown --fail-under=0; echo; echo "</details>"; } >> summary.md
+          fi
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Comentário no PR
         if: always() && github.event_name == 'pull_request'
@@ -51,15 +57,145 @@ jobs:
           python deploy/grafana/build_dashboard.py
           git diff --exit-code deploy/
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+          cache: pip
+      - run: pip install -e ".[dev]" pip-audit
+      - run: ruff check --output-format=github .
+      - run: ruff format --check .
+      - name: Tipos (mypy, módulos em pyproject.toml)
+        run: mypy
+      - name: Vulnerabilidades nas dependências
+        run: pip-audit --skip-editable
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build das imagens do backend e do frontend (sem publicar)
+        run: |
+          docker build -t changelog-watcher:ci .
+          docker build -f frontend/Dockerfile -t changelog-watcher-frontend:ci .
+      - name: Vulnerabilidades nas imagens (Trivy, HIGH/CRITICAL com correção disponível)
+        run: |
+          for img in changelog-watcher:ci changelog-watcher-frontend:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 \
+              image --quiet --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL "$img"
+          done
+
   helm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/changelog-watcher
-      - run: helm template ci deploy/helm/changelog-watcher --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true --set networkPolicy.prometheus.enabled=true --set networkPolicy.internet.enabled=true > /dev/null
-      - name: pvc gera StatefulSet; inMemory gera Deployment; tipo inválido falha
+      - name: pvc gera StatefulSet; inMemory gera Deployment
         run: |
           helm template ci deploy/helm/changelog-watcher | grep -q "^kind: StatefulSet"
           helm template ci deploy/helm/changelog-watcher -f deploy/helm/values-kind.yaml | grep -q "^kind: Deployment"
-          ! helm template ci deploy/helm/changelog-watcher --set persistence.type=postgres > /dev/null 2>&1
+      - name: Manifests válidos (kubeconform, CRDs pelo datreeio/CRDs-catalog)
+        run: |
+          set -o pipefail
+          C=deploy/helm/changelog-watcher
+          kc() {
+            docker run --rm -i ghcr.io/yannh/kubeconform:v0.8.0 -strict -summary -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          }
+          # fails <message> <helm args...>: the render must fail with that message
+          fails() { { helm template ci $C "${@:2}" 2>&1 || true; } | grep -q "$1"; }
+          helm template ci $C | kc
+          helm template ci $C -f deploy/helm/values-kind.yaml | kc
+          helm template ci $C --set ingress.enabled=true --set metrics.serviceMonitor.enabled=true \
+            --set metrics.prometheusRule.enabled=true --set grafana.dashboard.enabled=true \
+            --set networkPolicy.prometheus.enabled=true --set networkPolicy.internet.enabled=true \
+            --set auth.oidc.enabled=true --set auth.oidc.issuerUrl=https://dex.example.com/dex --set auth.oidc.clientSecret=ci --set 'auth.oidc.editorGroups[0]=platform' --set config.publicUrl=https://cw.example.com \
+            --set rbac.create=true --set frontend.enabled=true | kc
+          OIDC=$(helm template ci $C --set auth.enabled=false --set auth.oidc.enabled=true \
+            --set auth.oidc.issuerUrl=https://dex.example.com/dex --set auth.oidc.existingSecret=cw-oidc \
+            --set 'auth.oidc.viewerGroups[0]=devs' --set config.publicUrl=https://cw.example.com)
+          echo "$OIDC" | kc
+          echo "$OIDC" | grep -q 'name: cw-oidc, key: SESSION_SECRET'
+          if echo "$OIDC" | grep -q 'AUTH_DISABLED'; then exit 1; fi  # a "!" command never trips set -e
+          fails 'auth.oidc needs config.publicUrl' --set auth.oidc.enabled=true --set auth.oidc.issuerUrl=https://dex.example.com
+          # OIDC secrets go in the chart Secret: without it (secrets.existingSecret) auth.oidc.existingSecret is required
+          fails 'without auth.oidc.existingSecret' --set auth.oidc.enabled=true --set auth.oidc.issuerUrl=https://dex.example.com/dex \
+            --set auth.oidc.clientSecret=ci --set 'auth.oidc.editorGroups[0]=platform' --set config.publicUrl=https://cw.example.com \
+            --set secrets.existingSecret=mine
+          fails 'persistence.type' --set persistence.type=postgres
+          helm template ci $C --set rbac.create=true | kc
+          helm template ci $C --set rbac.create=true --set 'rbac.namespaces={a}' | kc
+          OUT=$(helm template ci $C --set persistence.existingClaim=data --set auth.existingSecret=cw-auth \
+            --set ingress.enabled=true --set 'ingress.tls[0].secretName=cw-tls' --set 'ingress.tls[0].hosts[0]=cw.example.com')
+          echo "$OUT" | kc
+          echo "$OUT" | grep -q 'claimName: data'
+          echo "$OUT" | grep -q 'name: cw-auth, key: AUTH_PASSWORD'
+          echo "$OUT" | grep -q 'secretName: cw-tls'
+          # IngressRoute (Traefik) e HTTPRoute (Gateway API); casos inválidos falham com a mensagem certa
+          helm template ci $C --set ingress.enabled=true --set ingress.type=ingressroute \
+            --set 'ingress.ingressRoute.entryPoints[0]=websecure' --set ingress.ingressRoute.tls.secretName=cw-tls | kc
+          helm template ci $C --set ingress.enabled=true --set ingress.type=httproute \
+            --set 'ingress.httpRoute.parentRefs[0].name=public' --set 'ingress.httpRoute.parentRefs[0].sectionName=https' | kc
+          fails 'parentRefs is required' --set ingress.enabled=true --set ingress.type=httproute
+          fails 'ingress.type must be' --set ingress.enabled=true --set ingress.type=nope
+          fails 'must not contain backticks' --set ingress.enabled=true --set ingress.type=ingressroute \
+            --set 'ingress.hosts[0].host=a`) || PathPrefix(`/' --set 'ingress.hosts[0].paths[0].path=/' \
+            --set 'ingress.hosts[0].paths[0].pathType=Prefix'
+          # frontend: Ingress aponta para o nginx, que o NetworkPolicy deixa chegar no backend
+          OUT=$(helm template ci $C --set frontend.enabled=true --set ingress.enabled=true \
+            --set networkPolicy.prometheus.enabled=true --set metrics.serviceMonitor.enabled=true)
+          echo "$OUT" | kc
+          helm template ci $C --set frontend.enabled=true --set ingress.enabled=true --show-only templates/ingress.yaml \
+            | grep -q 'name: ci-changelog-watcher-frontend$'
+          echo "$OUT" | grep -q '"app.kubernetes.io/name":"changelog-watcher-frontend"'
+
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1.15.2
+        with:
+          cluster_name: ci
+      - name: Imagens locais carregadas no kind
+        run: |
+          docker build -t changelog-watcher:local .
+          docker build -f frontend/Dockerfile -t changelog-watcher-frontend:local .
+          kind load docker-image changelog-watcher:local changelog-watcher-frontend:local --name ci
+      - name: Instala o chart com values-kind.yaml e o frontend
+        # sem ingress (o kind do CI não tem Traefik) e sem refresh na subida (não depende de rede externa)
+        run: |
+          helm install changelog-watcher deploy/helm/changelog-watcher -n cw --create-namespace \
+            -f deploy/helm/values-kind.yaml --set ingress.enabled=false --set config.refreshOnStartup=false \
+            --set frontend.enabled=true --wait --timeout 5m
+      - name: API responde com auth e o seed foi carregado
+        run: |
+          PASS=$(kubectl -n cw get secret changelog-watcher-secrets -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d)
+          kubectl -n cw port-forward svc/changelog-watcher 8080:80 &
+          for _ in $(seq 30); do curl -sf http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -sf http://127.0.0.1:8080/readyz
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/environments)" = 401
+          curl -sf -u "admin:$PASS" http://127.0.0.1:8080/api/environments | grep -q '"name":"kind-lab"'
+      - name: UI pelo frontend (nginx), com a API pelo proxy
+        run: |
+          PASS=$(kubectl -n cw get secret changelog-watcher-secrets -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d)
+          kubectl -n cw port-forward svc/changelog-watcher-frontend 8081:80 &
+          U=http://127.0.0.1:8081
+          for _ in $(seq 30); do curl -sf $U/frontend-healthz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' $U/)" = 401
+          curl -sf -u "admin:$PASS" $U/ | grep -q '/static/app.js'
+          curl -sfI -u "admin:$PASS" $U/ | grep -qi "content-security-policy:.*script-src 'self' 'sha256-"
+          curl -sfI -u "admin:$PASS" $U/static/app.js | grep -qi 'content-security-policy'
+          test "$(curl -s -o /dev/null -w '%{http_code}' $U/metrics)" = 404  # só o ServiceMonitor, direto no backend
+          curl -sf -u "admin:$PASS" $U/api/environments | grep -q '"name":"kind-lab"'
+          curl -sf $U/readyz
+      - name: Diagnóstico
+        if: failure()
+        run: |
+          kubectl -n cw get all
+          kubectl -n cw describe pods
+          kubectl -n cw logs -l app.kubernetes.io/instance=changelog-watcher --tail=200

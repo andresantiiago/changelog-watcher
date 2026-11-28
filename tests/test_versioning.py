@@ -3,19 +3,22 @@ import pytest
 from changelog_watcher.versioning import classify, image_repository, image_tag, parse_version
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("v1.2.3", "1.2.3"),
-    ("1.2", "1.2.0"),
-    ("release-1.2.3", "1.2.3"),
-    ("argo-cd-5.46.7", "5.46.7"),
-    ("1.25.3-alpine", "1.25.3"),
-    ("1.2.3-rc.1", "1.2.3-rc.1"),
-    ("v2.0.0-beta2", "2.0.0-beta.2"),
-    ("1.2.3.4", "1.2.3.4"),
-    ("v12", "12.0.0"),
-    ("0", "0.0.0"),
-    ("22.04", "22.4.0"),  # zero à esquerda com ponto é legítimo (Ubuntu)
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("v1.2.3", "1.2.3"),
+        ("1.2", "1.2.0"),
+        ("release-1.2.3", "1.2.3"),
+        ("argo-cd-5.46.7", "5.46.7"),
+        ("1.25.3-alpine", "1.25.3"),
+        ("1.2.3-rc.1", "1.2.3-rc.1"),
+        ("v2.0.0-beta2", "2.0.0-beta.2"),
+        ("1.2.3.4", "1.2.3.4"),
+        ("v12", "12.0.0"),
+        ("0", "0.0.0"),
+        ("22.04", "22.4.0"),  # zero à esquerda com ponto é legítimo (Ubuntu)
+    ],
+)
 def test_parse(text, expected):
     assert str(parse_version(text)) == expected
 

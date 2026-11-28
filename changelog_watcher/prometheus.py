@@ -19,9 +19,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from .i18n import _
 from . import safehttp
 from .config import expand_env
+from .i18n import _
 from .suggest import chart_name as _chart_name
 from .versioning import ghcr_repository, image_repository, image_tag, parse_version
 
@@ -84,8 +84,10 @@ def build_query(project, deployment, environment) -> str:
         filt = f', container="{_q(project.container_name)}"' if project.container_name else ""
         if project.image_pattern:  # pick one image when the release runs several (app + redis + ...)
             filt += f', image=~"{_q(_image_regex(project.image_pattern))}"'
-        by_label = (f"kube_pod_container_info{{{ns}{filt}{extra}}} * on(namespace, pod) group_left() "
-                    f'kube_pod_labels{{{ns}, label_app_kubernetes_io_instance="{_q(name)}"{extra}}}')
+        by_label = (
+            f"kube_pod_container_info{{{ns}{filt}{extra}}} * on(namespace, pod) group_left() "
+            f'kube_pod_labels{{{ns}, label_app_kubernetes_io_instance="{_q(name)}"{extra}}}'
+        )
         by_prefix = f'kube_pod_container_info{{{ns}, pod=~"{_q(re.escape(name))}-.+"{filt}{extra}}}'
         # Pods labelled app.kubernetes.io/instance=<release> when kube-state-metrics
         # exports that label (--metric-labels-allowlist); otherwise "<release>-*" pods.
@@ -140,13 +142,14 @@ def _basename(repo: str | None) -> str:
 
 
 def _names_image(name: str, repo: str | None) -> bool:
-    """"kube-prometheus-stack-prometheus" names the image ".../prometheus/prometheus"."""
+    """ "kube-prometheus-stack-prometheus" names the image ".../prometheus/prometheus"."""
     b = _basename(repo)
     return bool(b) and (name == b or name.endswith("-" + b) or name.startswith(b + "-"))
 
 
-def pick_version(series: list[dict], version_pattern: str | None = None, two_part: bool = False,
-                 prefer: str | None = None) -> Detection:
+def pick_version(
+    series: list[dict], version_pattern: str | None = None, two_part: bool = False, prefer: str | None = None
+) -> Detection:
     """The image most pods run; ``prefer`` (the release/workload name) breaks ties between
     different images ("kube-prometheus-stack-prometheus" -> prometheus, not its thanos sidecar)."""
     images: Counter[str] = Counter()
@@ -239,7 +242,12 @@ def _suggest(group: dict, comp: dict, multi: bool) -> dict:
     else:
         w = group["workloads"][0]
         if w["kind"] in _POD_SUFFIX:
-            out = {"name": w["name"], "detection_mode": "workload", "workload_kind": w["kind"], "workload_name": w["name"]}
+            out = {
+                "name": w["name"],
+                "detection_mode": "workload",
+                "workload_kind": w["kind"],
+                "workload_name": w["name"],
+            }
             if multi:
                 out["container_name"] = comp["containers"][0]["container"]
         else:
@@ -285,8 +293,9 @@ def _link_projects(groups: dict, rows: list[dict], projects) -> None:
         if p.detection_mode == "image":
             repos = {r["repo"] for r in sel}
         else:  # the image the detection would pick (majority, oldest on ties)
-            det = pick_version([{"metric": {"image": r["image"]}} for r in sel], p.image_version_pattern,
-                               prefer=p.workload_name)
+            det = pick_version(
+                [{"metric": {"image": r["image"]}} for r in sel], p.image_version_pattern, prefer=p.workload_name
+            )
             repos = {image_repository(det.image)}
         for r in sel:
             if r["repo"] in repos:
@@ -342,14 +351,23 @@ async def discover(environment, namespace: str | None = None, projects=()) -> li
         ns, pod, image = m.get("namespace"), m.get("pod"), m.get("image")
         kind, name = owner.get((ns, pod), ("pod", pod))
         lab = pod_labels.get((ns, pod), {})
-        release = lab.get("label_app_kubernetes_io_instance") or _release_for(
-            name, [r for n, r in releases if n == ns])
+        release = lab.get("label_app_kubernetes_io_instance") or _release_for(name, [r for n, r in releases if n == ns])
         key = (ns, release or f"{kind}/{name}")
-        g = groups.setdefault(key, {
-            "namespace": ns, "release": release, "helm": (ns, release) in releases,
-            "revision": releases.get((ns, release)), "chart": None, "parent": None,
-            "workloads": {}, "components": {}, "_charts": Counter(), "_links": set(),
-        })
+        g = groups.setdefault(
+            key,
+            {
+                "namespace": ns,
+                "release": release,
+                "helm": (ns, release) in releases,
+                "revision": releases.get((ns, release)),
+                "chart": None,
+                "parent": None,
+                "workloads": {},
+                "components": {},
+                "_charts": Counter(),
+                "_links": set(),
+            },
+        )
         chart = lab.get("label_helm_sh_chart")
         w = g["workloads"].setdefault(f"{kind}/{name}", {"kind": kind, "name": name, "chart": chart, "containers": {}})
         w["chart"] = w["chart"] or chart
@@ -358,8 +376,9 @@ async def discover(environment, namespace: str | None = None, projects=()) -> li
             g["_charts"][chart] += 1
         g["_links"].update(v for lbl in _LINK_LABELS if (v := lab.get(lbl)) and v != release)
         repo = image_repository(image)
-        comp = g["components"].setdefault(repo, {"repository": repo, "containers": [], "series": [], "charts": Counter(),
-                                                 "project": None})
+        comp = g["components"].setdefault(
+            repo, {"repository": repo, "containers": [], "series": [], "charts": Counter(), "project": None}
+        )
         ref = {"kind": kind, "workload": name, "container": m.get("container")}
         if ref not in comp["containers"]:
             comp["containers"].append(ref)
@@ -379,17 +398,33 @@ async def discover(environment, namespace: str | None = None, projects=()) -> li
             g["parent"] = links[0]
         elif not g["helm"]:  # e.g. pods an operator labels with its own instance name
             g["parent"] = _release_for(name, [r for n, r in releases if n == g["namespace"] and r != g["release"]])
-        g["workloads"] = [{**w, "containers": [{"container": c, "image": i} for c, i in w["containers"].items()]}
-                          for w in sorted(g["workloads"].values(), key=lambda w: w["name"])]
+        g["workloads"] = [
+            {**w, "containers": [{"container": c, "image": i} for c, i in w["containers"].items()]}
+            for w in sorted(g["workloads"].values(), key=lambda w: w["name"])
+        ]
         comps = []
         for c in g.pop("components").values():
             det = pick_version(c.pop("series"))
             charts = c.pop("charts")
-            comps.append({**c, "image": det.image, "version": det.version, "images": det.images, "pods": sum(det.images.values()),
-                          "chart": next((ch for ch in charts if _names_image(_chart_name(ch) or "", c["repository"])), None)})
+            comps.append(
+                {
+                    **c,
+                    "image": det.image,
+                    "version": det.version,
+                    "images": det.images,
+                    "pods": sum(det.images.values()),
+                    "chart": next((ch for ch in charts if _names_image(_chart_name(ch) or "", c["repository"])), None),
+                }
+            )
         # Main image: most pods; on ties the one the group is named after, then the oldest version.
-        comps.sort(key=lambda c: (-c["pods"], not _names_image(name, c["repository"]),
-                                  parse_version(image_tag(c["image"])) or parse_version("0.0.0"), c["repository"] or ""))
+        comps.sort(
+            key=lambda c: (
+                -c["pods"],
+                not _names_image(name, c["repository"]),
+                parse_version(image_tag(c["image"])) or parse_version("0.0.0"),
+                c["repository"] or "",
+            )
+        )
         multi, used = len(comps) > 1, set()
         for i, c in enumerate(comps):
             c["suggestion"] = sg = _suggest(g, c, multi)
@@ -401,13 +436,25 @@ async def discover(environment, namespace: str | None = None, projects=()) -> li
             c.pop("pods")
         comps[0]["chart"] = comps[0]["chart"] or g["chart"]
         main = comps[0]
-        g.update(image=main["image"], version=main["version"], images=main["images"], components=comps,
-                 suggestion=main["suggestion"], project=main["project"])
+        g.update(
+            image=main["image"],
+            version=main["version"],
+            images=main["images"],
+            components=comps,
+            suggestion=main["suggestion"],
+            project=main["project"],
+        )
         out.append(g)
 
     def order(g):
         family = g["parent"] or g["release"]
-        return (g["namespace"] or "", family is None, family or g["workloads"][0]["name"], g["parent"] is not None,
-                _base_name(g))
+        return (
+            g["namespace"] or "",
+            family is None,
+            family or g["workloads"][0]["name"],
+            g["parent"] is not None,
+            _base_name(g),
+        )
+
     out.sort(key=order)
     return out

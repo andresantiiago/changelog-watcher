@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
-from .i18n import _
 from . import safehttp
 from .config import expand_env, get_settings
+from .i18n import _
 from .models import Report, Webhook, utcnow
 from .report import EOL_ICON, STATUS_ICON, _pct, eol_when
 
@@ -41,8 +41,9 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
         {**row, "environments": {k: v for k, v in row["environments"].items() if int(k) in ids}}
         for row in data["drift"]
     ]
-    out["drift"] = [r for r in out["drift"]
-                    if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1]
+    out["drift"] = [
+        r for r in out["drift"] if len({v["version"] for v in r["environments"].values() if v["version"]}) > 1
+    ]
     out["drift_pairs"] = [p for p in data["drift_pairs"] if p["source"] in names and p["target"] in names]
     out["eol"] = [o for o in data.get("eol") or [] if o["environment_id"] in ids]
     return out
@@ -50,16 +51,27 @@ def filter_data(data: dict, environment_ids: list[int] | None) -> dict:
 
 def chat_lines(data: dict, max_items: int = 25) -> list[str]:
     """Compact, table-free text used by chat integrations (standard markdown)."""
-    lines = [_("**📦 Update report – {start} → {end}**", start=data["period_start"][:10], end=data["period_end"][:10]), ""]
+    lines = [
+        _("**📦 Update report – {start} → {end}**", start=data["period_start"][:10], end=data["period_end"][:10]),
+        "",
+    ]
     for s in data["summaries"]:
         c = s["counts"]
         lines.append(
-            _("**{env}**: {pct} up to date · {total} apps · pending: ", env=s["environment"],
-              pct=_pct(s["up_to_date_ratio"]), total=s["total"])
+            _(
+                "**{env}**: {pct} up to date · {total} apps · pending: ",
+                env=s["environment"],
+                pct=_pct(s["up_to_date_ratio"]),
+                total=s["total"],
+            )
             + f"🟡 {s['patch_pending']} {_('bugfix')} · 🟠 {s['minor_pending']} minor · 🔴 {s['major_pending']} major"
             + (_(" · 🔵 {n} within tolerance", n=c["tolerated"]) if c.get("tolerated") else "")
             + (_(" · ⚪ {n} without version", n=c["unknown"]) if c["unknown"] else "")
-            + (_(" · {n} libyears on average", n=f"{s['libyears_avg']:.2f}") if s.get("libyears_avg") is not None else "")
+            + (
+                _(" · {n} libyears on average", n=f"{s['libyears_avg']:.2f}")
+                if s.get("libyears_avg") is not None
+                else ""
+            )
         )
     releases = data["new_releases"]
     lines += ["", _("**New versions ({n})**", n=len(releases))]
@@ -84,8 +96,10 @@ def chat_lines(data: dict, max_items: int = 25) -> list[str]:
     if eol:
         lines += ["", _("**End of life (EOL) ({n})**", n=len(eol))]
         for o in eol[:max_items]:
-            lines.append(f"• {EOL_ICON[o['eol_status']]} {o['environment']} · {o['project']} {o['current_version']} "
-                         f"({o['eol_product']} {o['eol_cycle']}): {eol_when(o)}")
+            lines.append(
+                f"• {EOL_ICON[o['eol_status']]} {o['environment']} · {o['project']} {o['current_version']} "
+                f"({o['eol_product']} {o['eol_cycle']}): {eol_when(o)}"
+            )
         if len(eol) > max_items:
             lines.append(_("• … and {n} more", n=len(eol) - max_items))
     if data["drift"]:
@@ -105,13 +119,23 @@ def to_slack(text: str) -> str:
 
 
 def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
+    if kind in CHAT_KINDS:
+        return chat_payloads(kind, chat_lines(data))
+    return [{"event": "changelog_watcher.report", "markdown": markdown, "report": data}]
+
+
+CHAT_KINDS = ("slack", "google_chat", "discord", "teams")
+
+
+def chat_payloads(kind: str, lines: list[str]) -> list[dict]:
+    """Chat message(s) for ``kind`` from markdown lines; the first line is the title."""
     if kind == "slack":
-        return [{"text": to_slack("\n".join(chat_lines(data))), "mrkdwn": True}]
+        return [{"text": to_slack("\n".join(lines)), "mrkdwn": True}]
     if kind == "google_chat":
-        return [{"text": to_slack("\n".join(chat_lines(data)))}]
+        return [{"text": to_slack("\n".join(lines))}]
     if kind == "discord":
         chunks, current = [], ""
-        for line in chat_lines(data):
+        for line in lines:
             if len(current) + len(line) + 1 > 1900:
                 chunks.append(current)
                 current = ""
@@ -120,23 +144,33 @@ def build_payloads(kind: str, data: dict, markdown: str) -> list[dict]:
             chunks.append(current)
         return [{"content": c, "allowed_mentions": {"parse": []}} for c in chunks]
     if kind == "teams":
-        body = [{"type": "TextBlock", "text": line or " ", "wrap": True,
-                 **({"weight": "Bolder", "size": "Medium"} if i == 0 else {})}
-                for i, line in enumerate(chat_lines(data))]
-        return [{
-            "type": "message",
-            "attachments": [{
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "msteams": {"width": "Full"},
-                    "body": body,
-                },
-            }],
-        }]
-    return [{"event": "changelog_watcher.report", "markdown": markdown, "report": data}]
+        body = [
+            {
+                "type": "TextBlock",
+                "text": line or " ",
+                "wrap": True,
+                **({"weight": "Bolder", "size": "Medium"} if i == 0 else {}),
+            }
+            for i, line in enumerate(lines)
+        ]
+        return [
+            {
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "type": "AdaptiveCard",
+                            "version": "1.4",
+                            "msteams": {"width": "Full"},
+                            "body": body,
+                        },
+                    }
+                ],
+            }
+        ]
+    raise ValueError(kind)
 
 
 async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: httpx.AsyncClient) -> dict:
@@ -150,15 +184,18 @@ async def send_webhook(webhook: Webhook, data: dict, markdown: str, client: http
 
     if webhook.environment_ids:
         markdown = render_markdown(data)
-    payloads = build_payloads(webhook.kind, data, markdown)
+    return await post_payloads(webhook.name, url, build_payloads(webhook.kind, data, markdown), client)
+
+
+async def post_payloads(name: str, url: str, payloads: list[dict], client: httpx.AsyncClient) -> dict:
     try:
         for payload in payloads:
             resp = await client.post(url, json=payload)
             if resp.status_code >= 300:
-                return {"webhook": webhook.name, "ok": False, "detail": f"HTTP {resp.status_code}"}  # no body: SSRF read
-        return {"webhook": webhook.name, "ok": True, "detail": _("{n} message(s) sent", n=len(payloads))}
+                return {"webhook": name, "ok": False, "detail": f"HTTP {resp.status_code}"}  # no body: SSRF read
+        return {"webhook": name, "ok": True, "detail": _("{n} message(s) sent", n=len(payloads))}
     except (httpx.HTTPError, httpx.InvalidURL) as exc:  # InvalidURL is not an HTTPError
-        return {"webhook": webhook.name, "ok": False, "detail": str(exc)}
+        return {"webhook": name, "ok": False, "detail": str(exc)}
 
 
 def record_status(webhook: Webhook, result: dict, suffix: str = "") -> None:
@@ -173,7 +210,7 @@ async def deliver_report(session, report: Report, webhooks: list[Webhook]) -> li
             if not wh.enabled:
                 continue
             result = await send_webhook(wh, report.data, report.markdown, client)
-            result["sent_at"] = datetime.now(timezone.utc).isoformat()
+            result["sent_at"] = datetime.now(UTC).isoformat()
             record_status(wh, result)
             results.append(result)
             if not result["ok"]:

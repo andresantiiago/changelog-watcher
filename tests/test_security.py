@@ -27,8 +27,19 @@ def test_expand_env_whole_value_only(monkeypatch):
 
 
 def _project(**kw):
-    return Project(**{"name": "p", "source_type": "github_releases", "repository": "org/repo", "tag_pattern": None,
-                      "changelog_url": None, "source_url": None, "chart_name": None, "use_app_version": False, **kw})
+    return Project(
+        **{
+            "name": "p",
+            "source_type": "github_releases",
+            "repository": "org/repo",
+            "tag_pattern": None,
+            "changelog_url": None,
+            "source_url": None,
+            "chart_name": None,
+            "use_app_version": False,
+            **kw,
+        }
+    )
 
 
 async def _fetch(project):
@@ -38,7 +49,9 @@ async def _fetch(project):
 
 @respx.mock
 def test_github_token_only_to_configured_api():
-    official = respx.get("https://api.github.com/repos/org/repo/releases").mock(return_value=httpx.Response(200, json=[]))
+    official = respx.get("https://api.github.com/repos/org/repo/releases").mock(
+        return_value=httpx.Response(200, json=[])
+    )
     evil = respx.get("https://atacante.example/repos/org/repo/releases").mock(return_value=httpx.Response(200, json=[]))
     asyncio.run(_fetch(_project()))
     asyncio.run(_fetch(_project(source_url="https://atacante.example")))
@@ -48,7 +61,9 @@ def test_github_token_only_to_configured_api():
 
 @respx.mock
 def test_fetch_file_token_by_hostname_not_substring():
-    raw = respx.get("https://raw.githubusercontent.com/o/r/main/CHANGELOG.md").mock(return_value=httpx.Response(200, text="x"))
+    raw = respx.get("https://raw.githubusercontent.com/o/r/main/CHANGELOG.md").mock(
+        return_value=httpx.Response(200, text="x")
+    )
     evil = respx.get("https://atacante.example/api.github.com/x").mock(return_value=httpx.Response(200, text="x"))
 
     async def go(url):
@@ -62,15 +77,29 @@ def test_fetch_file_token_by_hostname_not_substring():
 
 
 def test_masked_secret_cannot_follow_a_new_url(client):
-    env = client.post("/api/environments", json={"name": "e", "prometheus_url": "http://prom:9090",
-                                                 "prometheus_auth": "bearer", "prometheus_token": "abc"}).json()
+    env = client.post(
+        "/api/environments",
+        json={
+            "name": "e",
+            "prometheus_url": "http://prom:9090",
+            "prometheus_auth": "bearer",
+            "prometheus_token": "abc",
+        },
+    ).json()
     moved = client.put(f"/api/environments/{env['id']}", json={**env, "prometheus_url": "https://atacante.example"})
     assert moved.status_code == 422
     assert client.put(f"/api/environments/{env['id']}", json={**env, "description": "ok"}).status_code == 200
 
 
-@pytest.mark.parametrize("url", ["http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:8080/api",
-                                 "http://[::ffff:169.254.169.254]/", "http://localhost/"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://127.0.0.1:8080/api",
+        "http://[::ffff:169.254.169.254]/",
+        "http://localhost/",
+    ],
+)
 def test_guard_blocks_loopback_and_link_local(url):
     async def go():
         async with safehttp.client() as c:
@@ -83,7 +112,8 @@ def test_guard_blocks_loopback_and_link_local(url):
 @respx.mock
 def test_guard_checks_redirects():
     respx.get("https://publico.example/x").mock(
-        return_value=httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"}))
+        return_value=httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+    )
 
     async def go():
         async with safehttp.client(follow_redirects=True) as c:
@@ -98,7 +128,9 @@ def test_prometheus_error_does_not_echo_body():
     from changelog_watcher import prometheus as prom
 
     respx.get("http://interno.example/api/v1/query").mock(return_value=httpx.Response(200, text="SEGREDO-INTERNO"))
-    env = Environment(name="e", prometheus_url="http://interno.example", prometheus_auth="none", prometheus_verify_tls=True)
+    env = Environment(
+        name="e", prometheus_url="http://interno.example", prometheus_auth="none", prometheus_verify_tls=True
+    )
     with pytest.raises(prom.PrometheusError) as exc:
         asyncio.run(prom.instant_query(env, "up"))
     assert "SEGREDO-INTERNO" not in str(exc.value)
@@ -142,8 +174,10 @@ def test_release_urls_must_be_http(client):
     from changelog_watcher.models import Release
     from changelog_watcher.refresh import refresh_project_releases
 
-    pid = client.post("/api/projects?refresh=false", json={"name": "h", "source_type": "helm_index",
-                                                          "repository": "https://charts.example", "chart_name": "app"}).json()["id"]
+    pid = client.post(
+        "/api/projects?refresh=false",
+        json={"name": "h", "source_type": "helm_index", "repository": "https://charts.example", "chart_name": "app"},
+    ).json()["id"]
     index = "entries:\n  app:\n    - version: 1.0.0\n      urls: ['javascript:alert(1)']\n"
     with respx.mock:
         respx.get("https://charts.example/index.yaml").mock(return_value=httpx.Response(200, text=index))
@@ -151,6 +185,7 @@ def test_release_urls_must_be_http(client):
         async def go():
             async with httpx.AsyncClient() as c:
                 return await refresh_project_releases(pid, c)
+
         asyncio.run(go())
     with session_scope() as s:
         assert [r.url for r in s.query(Release).filter_by(project_id=pid)] == [None]

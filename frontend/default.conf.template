@@ -1,0 +1,75 @@
+# The UI (/ and /static/) is served here; every other path (/api, /docs, /openapi.json,
+# /healthz...) goes to the backend, so one Ingress rule or a port-forward to this Service is
+# enough and the UI keeps calling the API on its own origin (no CORS).
+
+# CSP on the UI only (FastAPI's /docs, proxied, loads Swagger UI from a CDN). $request_uri, not
+# $uri: try_files rewrites / to /index.html. The hash is the inline theme script of index.html
+# (tests/test_deploy.py checks it).
+map $request_uri $csp {
+    ~^/(static/|$|\?)  "default-src 'self'; script-src 'self' 'sha256-Oz+LIFt/TLkq9lf45dJLKu3dcJpuUuxKxfs6F0CEGLI='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+    default            "";
+}
+
+server {
+    listen 8080;
+    server_tokens off;
+    root /usr/share/nginx/html;
+
+    # On every response, proxied ones included. An empty value sends no header.
+    # same-origin, not no-referrer: no-referrer can make the browser send "Origin: null" on
+    # writes, which the backend's same-origin check refuses.
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy same-origin always;
+    add_header Content-Security-Policy $csp always;
+
+    # Original Host: the backend's same-origin (CSRF) check compares it with Origin.
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+
+    location = /frontend-healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Prometheus scrapes the backend directly (ServiceMonitor); not proxied, so the frontend
+    # (no NetworkPolicy of its own) does not open /metrics to every pod.
+    location = /metrics {
+        return 404;
+    }
+
+    # The UI asks for the same credentials as the API: the backend checks each request (/_auth)
+    # and, on a 401, answers the original request itself (@backend): the Basic Auth challenge,
+    # or with OIDC the redirect to /auth/login (an /api 401 has neither).
+    location = / {
+        auth_request /_auth;
+        error_page 401 = @backend;
+        try_files /index.html =404;
+        expires epoch;  # Cache-Control: no-cache (revalidate with ETag)
+    }
+
+    # No content hash in the file names: revalidated (304) so a new UI applies on the next reload.
+    location /static/ {
+        auth_request /_auth;
+        error_page 401 = @backend;
+        expires epoch;
+    }
+
+    location = /_auth {
+        internal;
+        proxy_method GET;
+        proxy_pass ${BACKEND_URL}/api/refresh/status;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+    }
+
+    location / {
+        proxy_pass ${BACKEND_URL};
+    }
+
+    location @backend {
+        proxy_pass ${BACKEND_URL};
+    }
+}
