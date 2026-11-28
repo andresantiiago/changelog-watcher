@@ -68,6 +68,27 @@ resources:
   limits:
     memory: 512Mi
 
+# Optional frontend: the UI in its own Deployment (unprivileged nginx). Its image is released
+# with the chart, so a UI-only release rolls only these pods, not the backend (scheduler, SQLite).
+# nginx serves / and /static/ (asking for the same Basic Auth as the API) and proxies everything
+# else (/api, /docs, /metrics...) to the backend Service: the Ingress and port-forward point at
+# the frontend Service (<fullname>-frontend). Off: the backend serves the UI, as before.
+# Shares imagePullSecrets, podSecurityContext, securityContext, service.type/port,
+# nodeSelector and tolerations with the backend.
+frontend:
+  enabled: false
+  image:
+    repository: ghcr.io/andresantiiago/changelog-watcher-frontend
+    tag: ""            # default: .Chart.Version
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi  # nginx starts one worker per node CPU
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

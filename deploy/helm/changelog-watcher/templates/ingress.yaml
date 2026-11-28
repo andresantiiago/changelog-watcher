@@ -24,7 +24,8 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "cw.fullname" $ }}
+                {{- /* frontend: nginx serves the UI and proxies the rest (/api, /docs...) to the backend */}}
+                name: {{ include "cw.fullname" $ }}{{ if $.Values.frontend.enabled }}-frontend{{ end }}
                 port:
                   name: http
           {{- end }}

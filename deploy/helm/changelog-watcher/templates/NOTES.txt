@@ -11,7 +11,7 @@ ATENÇÃO: banco em memória (persistence.type=inMemory) – os dados serão PER
 Acesse: {{ range .Values.ingress.hosts }}http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
 {{- else }}
 Acesse localmente:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }} 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }}{{ if .Values.frontend.enabled }}-frontend{{ end }} 8080:{{ .Values.service.port }}
   abra http://localhost:8080
 {{- end }}
 
@@ -23,7 +23,9 @@ Usuário: {{ .Values.auth.username }} – senha gerada no Secret {{ include "cw.
 {{- end }}
 
 {{- with .Values.networkPolicy.prometheus }}
-{{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
+{{- if and .enabled $.Values.frontend.enabled }}
+ATENÇÃO: o frontend não tem NetworkPolicy própria: qualquer pod alcança a UI/API por ele (com autenticação; /metrics não passa por ele).
+{{- else if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
 ATENÇÃO: networkPolicy.prometheus está ligada sem allowIngressFrom: o Ingress não alcança o pod.
 {{- end }}
 {{- end }}
@@ -45,7 +47,7 @@ WARNING: in-memory database (persistence.type=inMemory) – data is LOST when th
 Open: {{ range .Values.ingress.hosts }}http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
 {{- else }}
 Open locally:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }} 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }}{{ if .Values.frontend.enabled }}-frontend{{ end }} 8080:{{ .Values.service.port }}
   then http://localhost:8080
 {{- end }}
 
@@ -57,7 +59,9 @@ User: {{ .Values.auth.username }} – password generated in the Secret {{ includ
 {{- end }}
 
 {{- with .Values.networkPolicy.prometheus }}
-{{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
+{{- if and .enabled $.Values.frontend.enabled }}
+WARNING: the frontend has no NetworkPolicy of its own: any pod reaches the UI/API through it (authenticated; /metrics is not proxied).
+{{- else if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
 WARNING: networkPolicy.prometheus is on without allowIngressFrom: the Ingress cannot reach the pod.
 {{- end }}
 {{- end }}
