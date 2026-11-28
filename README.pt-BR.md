@@ -351,7 +351,8 @@ ConfigMap do dashboard.
 A UI/API exige Basic Auth por padrão (`auth.enabled: true`). Sem `auth.password` nem
 `auth.existingSecret`, o chart gera uma senha aleatória no Secret (mantida nos upgrades); o
 comando para lê-la aparece nas notas do `helm install`. Use TLS no Ingress (`ingress.tls`):
-a senha vai em cada requisição.
+a senha vai em cada requisição. Para SSO, veja [Login SSO (OIDC / Dex)](#login-sso-oidc--dex)
+(`auth.oidc`).
 
 #### NetworkPolicies
 
@@ -457,7 +458,7 @@ recusadas quando o host resolve para loopback ou link-local (metadata da nuvem,
 | `REPORT_DAYS` | `7` | janela de "novas versões" do relatório |
 | `REPORT_SEND_ENABLED` | `true` | envia o relatório agendado aos webhooks |
 | `TZ` | `UTC` | fuso do agendador |
-| `PUBLIC_URL` | — | link para a UI incluído no relatório |
+| `PUBLIC_URL` | — | link para a UI incluído no relatório; com OIDC, base do redirect URI (obrigatório, `https` exceto em localhost) |
 | `APP_LANGUAGE` | `en` | idioma da interface, relatórios e webhooks (`en` ou `pt-BR`); padrão, editável na página Configuração |
 | `MAX_RELEASE_PAGES` | `3` | páginas de 100 releases/tags buscadas por fonte |
 | `EOL_ENABLED` | `true` | consulta o fim de suporte (EOL) no endoflife.date a cada atualização |
@@ -465,11 +466,74 @@ recusadas quando o host resolve para loopback ou link-local (metadata da nuvem,
 | `EOL_WARNING_DAYS` | `90` | avisa "EOL próximo" quando faltam até N dias |
 | `EOL_AUTO_MATCH` | `true` | sem produto informado, procura pelo nome/repositório da aplicação |
 | `TOLERANCE_DAYS` / `TOLERANCE_MINORS` / `TOLERANCE_BUGFIXES` | `60` / `1` / `3` | [tolerância de desatualização](#tolerância-de-desatualização); `off` desativa o critério; editável na página Configurações |
-| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API, obrigatória (`/healthz` e `/readyz` ficam abertos); sem elas a aplicação não sobe |
-| `AUTH_DISABLED` | `false` | `true` roda sem autenticação (só para testes locais) |
+| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth na UI/API (`/healthz` e `/readyz` ficam abertos); sem elas e sem OIDC a aplicação não sobe |
+| `AUTH_DISABLED` | `false` | `true` roda sem autenticação quando nem Basic Auth nem OIDC estão configurados (só para testes locais) |
+| `OIDC_ISSUER_URL` | — | [login SSO](#login-sso-oidc--dex): issuer do provedor OIDC, exatamente como no documento de descoberta (`https`); qualquer `OIDC_*` liga o OIDC e torna obrigatórias as variáveis abaixo |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | client OIDC registrado no provedor |
+| `OIDC_SCOPES` | `openid email profile groups` | scopes pedidos, `openid` obrigatório (o Dex só envia `groups` quando pedido) |
+| `OIDC_EDITOR_GROUPS` / `OIDC_VIEWER_GROUPS` | — | grupos separados por vírgula (claim `groups`) que podem editar / só ler; pelo menos um é obrigatório, quem não está em nenhum recebe 403 |
+| `SESSION_SECRET` | — | chave (≥ 32 caracteres) que assina o cookie de sessão; obrigatória com OIDC |
+| `SESSION_MAX_AGE_HOURS` | `12` | duração da sessão; os grupos são lidos de novo no próximo login |
 | `METRICS_TOKEN` | — | bearer token exigido em `/metrics`; vazio = aberto |
 | `SCHEDULER_ENABLED` | `true` | desativa o agendador interno |
 | `METRICS_CACHE_SECONDS` | `30` | cache das métricas calculadas |
+
+### Login SSO (OIDC / Dex)
+
+Além do Basic Auth, a UI pode autenticar pelo provedor OIDC (Authorization Code com PKCE).
+Testado com o [Dex](https://dexidp.io); qualquer provedor com
+`/.well-known/openid-configuration` deve funcionar.
+
+- Abrir a UI sem sessão redireciona para o provedor; chamadas à API sem sessão recebem `401`
+  (sem redirect). A sessão é um cookie assinado (`HttpOnly`, `Secure`, `SameSite=Lax`) válido
+  por `SESSION_MAX_AGE_HOURS`, então a UI precisa ser servida por HTTPS.
+- Membros de `OIDC_EDITOR_GROUPS` podem alterar tudo; membros de `OIDC_VIEWER_GROUPS` só leem
+  (qualquer método além de `GET`/`HEAD`/`OPTIONS` recebe `403`, e a UI esconde os botões de
+  edição). Os demais são recusados após o login.
+- *Sair* (barra superior) encerra a sessão local e, se o provedor publicar um
+  `end_session_endpoint`, a dele também (o Dex não tem: só a sessão local termina). Esse
+  redirect envia `client_id`, não `id_token_hint` (provedores que exigem mantêm a sessão deles).
+- A sessão é um cookie assinado sem estado: sair não revoga cópias já emitidas, que valem até
+  `SESSION_MAX_AGE_HOURS`. Trocar o `SESSION_SECRET` encerra todas as sessões.
+- O Basic Auth continua valendo junto com o OIDC para scripts e clientes da API (envie as
+  credenciais direto: com OIDC ligado não há desafio Basic). `/healthz`, `/readyz` e `/metrics`
+  se comportam como antes (`/metrics` só verifica o `METRICS_TOKEN`).
+
+Client estático na config do Dex (`redirectURIs` = `PUBLIC_URL` + `/auth/callback`):
+
+```yaml
+staticClients:
+  - id: changelog-watcher
+    name: Changelog Watcher
+    secret: <segredo aleatório longo>   # o mesmo em OIDC_CLIENT_SECRET
+    redirectURIs:
+      - https://changelog.example.com/auth/callback
+```
+
+Os grupos vêm do connector do Dex (ex.: GitHub `org:time`, grupos LDAP); as senhas estáticas
+do Dex não têm grupos. No Helm, o Basic Auth continua sendo o padrão e o `values.yaml` traz o
+bloco `auth.oidc` comentado: descomente e preencha:
+
+```yaml
+config:
+  publicUrl: https://changelog.example.com
+auth:
+  enabled: false                 # true mantém o Basic Auth também (para clientes da API)
+  oidc:
+    enabled: true
+    issuerUrl: https://dex.example.com/dex
+    clientId: changelog-watcher
+    existingSecret: changelog-watcher-oidc   # chaves OIDC_CLIENT_SECRET e SESSION_SECRET
+    editorGroups: ["minha-org:plataforma"]
+    viewerGroups: ["minha-org:devs"]
+```
+
+Sem `existingSecret`, informe `auth.oidc.clientSecret`; o chart guarda no Secret dele e gera o
+`SESSION_SECRET` (mantido nos upgrades via `lookup`). Com Argo CD/GitOps ou `helm template`, o
+`lookup` vem vazio e esse `SESSION_SECRET` muda a cada sync (derrubando todas as sessões): use
+`existingSecret`, obrigatório também com `secrets.create=false` ou `secrets.existingSecret`. O
+pod precisa alcançar o `issuerUrl`: com `networkPolicy.internet` ligada, um Dex dentro do
+cluster (IP privado) fica bloqueado.
 
 ### Criando os tokens
 
@@ -600,6 +664,7 @@ changelog_watcher/
   webhooks.py   formatos Slack/Teams/Discord/Google Chat/genérico
   alerts.py     alertas imediatos após cada atualização (major, segurança, atraso)
   metrics.py    collector Prometheus
+  auth.py       Basic Auth, login OIDC e cookie de sessão
   api.py        API REST (FastAPI)
   static/       frontend (HTML/JS/CSS, sem build; textos em i18n.js)
 deploy/

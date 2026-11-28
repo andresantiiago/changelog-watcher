@@ -364,6 +364,9 @@ const I18N = {
     "{ok}/{total} deliveries ok": "{ok}/{total} envios ok",
     "↻ Fetch releases": "↻ Buscar releases",
     "⚠ detection failed": "⚠ detecção falhou",
+    "read-only": "somente leitura",
+    "Session expired": "Sessão expirada",
+    "Sign out": "Sair",
   },
 };
 

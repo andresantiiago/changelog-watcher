@@ -224,4 +224,12 @@ _PT_BR: dict[str, str] = {
     "empty URL": "URL vazia",
     "{n} message(s) sent": "{n} mensagem(ns) enviada(s)",
     "ERROR": "ERRO",
+    # auth
+    "read-only access": "acesso somente leitura",
+    "Sign in": "Entrar",
+    "The identity provider is unavailable, try again later.": "O provedor de identidade está indisponível, tente novamente mais tarde.",
+    "Login expired or invalid, sign in again.": "Login expirado ou inválido, entre novamente.",
+    "Login failed.": "Falha no login.",
+    "Your account is not in a group allowed to use Changelog Watcher.": "Sua conta não está em um grupo com acesso ao Changelog Watcher.",
+    "You have signed out.": "Você saiu.",
 }

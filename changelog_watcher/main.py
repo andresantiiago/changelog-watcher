@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import secrets
 from contextlib import asynccontextmanager
@@ -14,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 from sqlalchemy import text
 
-from . import __version__, i18n, logstore
+from . import __version__, auth, i18n, logstore
 from .api import router
 from .config import get_settings
 from .db import get_engine, init_engine, is_memory, session_scope
@@ -64,39 +63,18 @@ def create_app() -> FastAPI:
     settings = get_settings()
     i18n.reset()  # language: env var / Settings page of this app's database
 
-    has_auth = bool(settings.auth_username and settings.auth_password)
-    if not has_auth and not settings.auth_disabled:
-        # Fail closed: an open API lets anyone reconfigure the app and reach internal hosts.
-        raise RuntimeError("set AUTH_USERNAME and AUTH_PASSWORD (or AUTH_DISABLED=true to run without authentication)")
+    auth.check_config(settings)
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):
-        """CSRF: browsers resend Basic Auth credentials on cross-site form posts."""
+        """CSRF: browsers resend Basic Auth credentials (and cookies) on cross-site form posts."""
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
             if origin and urlsplit(origin).netloc != request.headers.get("host"):
                 return JSONResponse({"detail": _("cross-origin request blocked")}, status_code=403)
         return await call_next(request)
 
-    if has_auth:
-        # bytes: compare_digest raises TypeError on non-ASCII str
-        expected = (settings.auth_username.encode(), settings.auth_password.encode())
-        open_paths = ("/healthz", "/readyz", "/metrics")  # /metrics: METRICS_TOKEN, checked below
-
-        @app.middleware("http")
-        async def basic_auth(request: Request, call_next):
-            if request.url.path in open_paths:
-                return await call_next(request)
-            header = request.headers.get("authorization", "")
-            if header.lower().startswith("basic "):
-                try:
-                    user, _, pwd = base64.b64decode(header[6:]).partition(b":")
-                except Exception:
-                    user = pwd = b""
-                if secrets.compare_digest(user, expected[0]) and secrets.compare_digest(pwd, expected[1]):
-                    return await call_next(request)
-            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="changelog-watcher"'})
-
+    auth.install(app, settings)
     app.include_router(router)
 
     @app.get("/healthz", include_in_schema=False)

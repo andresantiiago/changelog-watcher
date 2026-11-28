@@ -352,7 +352,8 @@ dashboard ConfigMap.
 The UI/API requires Basic Auth by default (`auth.enabled: true`). Without `auth.password` or
 `auth.existingSecret`, the chart generates a random password in the Secret (kept across
 upgrades); the command to read it shows up in the `helm install` notes. Use TLS on the Ingress
-(`ingress.tls`): the password goes in every request.
+(`ingress.tls`): the password goes in every request. For SSO, see
+[SSO login (OIDC / Dex)](#sso-login-oidc--dex) (`auth.oidc`).
 
 #### NetworkPolicies
 
@@ -461,7 +462,7 @@ networks are still allowed.
 | `REPORT_DAYS` | `7` | "new versions" window of the report |
 | `REPORT_SEND_ENABLED` | `true` | sends the scheduled report to the webhooks |
 | `TZ` | `UTC` | scheduler time zone |
-| `PUBLIC_URL` | — | link to the UI included in the report |
+| `PUBLIC_URL` | — | link to the UI included in the report; with OIDC, base of the redirect URI (required, `https` except on localhost) |
 | `APP_LANGUAGE` | `en` | interface, report and webhook language (`en` or `pt-BR`); default, editable on the Settings page |
 | `MAX_RELEASE_PAGES` | `3` | pages of 100 releases/tags fetched per source |
 | `EOL_ENABLED` | `true` | looks up the end of life (EOL) on endoflife.date on every refresh |
@@ -469,11 +470,74 @@ networks are still allowed.
 | `EOL_WARNING_DAYS` | `90` | warns "EOL soon" when at most N days are left |
 | `EOL_AUTO_MATCH` | `true` | without a product set, looks the application's name/repository up |
 | `TOLERANCE_DAYS` / `TOLERANCE_MINORS` / `TOLERANCE_BUGFIXES` | `60` / `1` / `3` | [outdated tolerance](#outdated-tolerance); `off` disables the criterion; editable on the Settings page |
-| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth on the UI/API, required (`/healthz` and `/readyz` stay open); without them the application does not start |
-| `AUTH_DISABLED` | `false` | `true` runs without authentication (local tests only) |
+| `AUTH_USERNAME` / `AUTH_PASSWORD` | — | basic auth on the UI/API (`/healthz` and `/readyz` stay open); without them and without OIDC the application does not start |
+| `AUTH_DISABLED` | `false` | `true` runs without authentication when neither Basic Auth nor OIDC is set (local tests only) |
+| `OIDC_ISSUER_URL` | — | [SSO login](#sso-login-oidc--dex): issuer of the OIDC provider, exactly as in its discovery document (`https`); setting any `OIDC_*` enables OIDC and makes the ones below required |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | OIDC client registered in the provider |
+| `OIDC_SCOPES` | `openid email profile groups` | scopes requested, `openid` required (Dex only sends `groups` when asked) |
+| `OIDC_EDITOR_GROUPS` / `OIDC_VIEWER_GROUPS` | — | comma-separated groups (`groups` claim) that can edit / only read; at least one of them is required, users in neither get 403 |
+| `SESSION_SECRET` | — | key (≥ 32 characters) that signs the session cookie; required with OIDC |
+| `SESSION_MAX_AGE_HOURS` | `12` | session lifetime; groups are read again at the next login |
 | `METRICS_TOKEN` | — | bearer token required on `/metrics`; empty = open |
 | `SCHEDULER_ENABLED` | `true` | disables the internal scheduler |
 | `METRICS_CACHE_SECONDS` | `30` | cache of the computed metrics |
+
+### SSO login (OIDC / Dex)
+
+Besides Basic Auth, the UI can sign users in through an OIDC provider (Authorization Code with
+PKCE). Tested against [Dex](https://dexidp.io); any provider with
+`/.well-known/openid-configuration` should work.
+
+- Opening the UI without a session redirects to the provider; API calls without a session get
+  `401` (no redirect). The session is a signed cookie (`HttpOnly`, `Secure`, `SameSite=Lax`)
+  valid for `SESSION_MAX_AGE_HOURS`, so the UI must be served over HTTPS.
+- Members of `OIDC_EDITOR_GROUPS` can change everything; members of `OIDC_VIEWER_GROUPS` only
+  read (any method other than `GET`/`HEAD`/`OPTIONS` gets `403`, and the UI hides the editing
+  buttons). Anyone else is refused after the login.
+- *Sign out* (top bar) ends the local session and, if the provider publishes an
+  `end_session_endpoint`, its session too (Dex has none: only the local session ends). That
+  redirect sends `client_id`, not `id_token_hint` (providers that require it keep their session).
+- The session is a stateless signed cookie: signing out does not revoke copies already issued,
+  they last until `SESSION_MAX_AGE_HOURS`. Rotating `SESSION_SECRET` ends every session.
+- Basic Auth keeps working alongside OIDC for scripts and API clients (send the credentials
+  directly: with OIDC on there is no Basic challenge). `/healthz`, `/readyz` and `/metrics`
+  behave as before (`/metrics` only checks `METRICS_TOKEN`).
+
+Static client in the Dex config (`redirectURIs` = `PUBLIC_URL` + `/auth/callback`):
+
+```yaml
+staticClients:
+  - id: changelog-watcher
+    name: Changelog Watcher
+    secret: <long random secret>        # also in OIDC_CLIENT_SECRET
+    redirectURIs:
+      - https://changelog.example.com/auth/callback
+```
+
+Groups come from the Dex connector (e.g. GitHub `org:team`, LDAP groups); Dex's static
+passwords have no groups. With Helm, Basic Auth stays the default and `values.yaml` ships the
+`auth.oidc` block commented out: uncomment it and fill in:
+
+```yaml
+config:
+  publicUrl: https://changelog.example.com
+auth:
+  enabled: false                 # true keeps Basic Auth too (for API clients)
+  oidc:
+    enabled: true
+    issuerUrl: https://dex.example.com/dex
+    clientId: changelog-watcher
+    existingSecret: changelog-watcher-oidc   # keys OIDC_CLIENT_SECRET and SESSION_SECRET
+    editorGroups: ["my-org:platform"]
+    viewerGroups: ["my-org:developers"]
+```
+
+Without `existingSecret`, set `auth.oidc.clientSecret`; the chart then stores it in its Secret
+and generates `SESSION_SECRET` (kept across upgrades by `lookup`). With Argo CD/GitOps or
+`helm template`, `lookup` is empty and that `SESSION_SECRET` changes on every sync (logging
+everyone out): use `existingSecret`, which is also required with `secrets.create=false` or
+`secrets.existingSecret`. The pod must reach `issuerUrl`: with `networkPolicy.internet` on, an
+in-cluster Dex (private IP) is blocked.
 
 ### Creating the tokens
 
@@ -607,6 +671,7 @@ changelog_watcher/
   webhooks.py   Slack/Teams/Discord/Google Chat/generic formats
   alerts.py     immediate alerts after each refresh (major, security, delay)
   metrics.py    Prometheus collector
+  auth.py       Basic Auth, OIDC login and session cookie
   api.py        REST API (FastAPI)
   static/       frontend (HTML/JS/CSS, no build step; texts in i18n.js)
 deploy/
