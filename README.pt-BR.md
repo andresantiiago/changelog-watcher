@@ -170,6 +170,25 @@ namespace e nome do workload, e o **seletor extra** do ambiente (ex.
 O botão **Testar detecção**, na página da aplicação, mostra a consulta e o
 resultado sem salvar nada.
 
+### Sem Prometheus: API do Kubernetes, Argo CD e Flux
+
+Por ambiente, a **Origem da versão** de uma aplicação também pode ser `API do Kubernetes`, `Argo CD`
+ou `Flux`. Elas leem o cluster em que o próprio app roda (token da ServiceAccount, somente leitura),
+sem precisar de Prometheus; o **modo de detecção** da aplicação precisa ser `workload` (para exibir
+os campos) e o **Namespace**/**nome** (sobrescrevíveis por ambiente) apontam para o objeto:
+
+| Origem da versão | Lê | Versão |
+|---|---|---|
+| `kubernetes` | Deployment/StatefulSet/DaemonSet (**Tipo de workload**) | tag da imagem do **Container** (opcional se houver só um, ou um com o nome do workload) |
+| `argocd` | `Application` (`argoproj.io/v1alpha1`) | primeira versão exata entre `spec.source(s)[].targetRevision`, depois `status.sync.revision(s)` |
+| `flux` | `HelmRelease` (`helm.toolkit.fluxcd.io/v2`) | versão do chart do último release implantado (`status.history`), senão `spec.chart.spec.version` |
+
+Faixas (`1.2.*`), branches e commits são ignorados. O regex de **Padrão de versão** também vale.
+É preciso uma ServiceAccount com RBAC somente leitura: `rbac.create=true` no chart Helm (um
+ClusterRole, ou Roles nos namespaces de `rbac.namespaces`). Erros (não encontrado, sem permissão,
+fora de um cluster...) aparecem como erro de detecção do deployment, e **Testar detecção** funciona
+igual. Com NetworkPolicies ativas, libere também o egress para o API server.
+
 ### Releases Helm e descoberta no cluster
 
 Charts que criam vários Deployments (Argo CD: server, repo-server, controller,
@@ -590,7 +609,7 @@ Todas com prefixo `changelog_watcher_`, calculadas a partir do banco a cada scra
 | `app_versions_behind` | project, environment, type (`patch`/`minor`/`major`/`total`) | versões atrás |
 | `app_outdated_days` | project, environment | dias desde a primeira versão mais nova |
 | `app_libyears` | project, environment | libyears |
-| `app_detection_error` | project, environment | 1 se a detecção via Prometheus falhou |
+| `app_detection_error` | project, environment | 1 se a detecção da versão (Prometheus, API do Kubernetes, Argo CD, Flux) falhou |
 | `environment_apps` | environment, status | implantações por status |
 | `environment_apps_pending` | environment, type | implantações com atualização do tipo (não exclusivo) |
 | `environment_up_to_date_ratio` | environment | fração atualizada |
@@ -635,6 +654,7 @@ dias, fim de suporte próximo/atingido, falha de detecção e coleta parada.
 changelog_watcher/
   sources/      fontes de releases (github, gitlab, helm, dockerhub, changelog, página web)
   prometheus.py detecção da versão em uso via kube_pod_container_info
+  kube.py       detecção via API do Kubernetes (imagem do workload, Argo CD, Flux)
   versioning.py parsing de versões e classificação bugfix/minor/major
   analysis.py   status por implantação, resumos, comparação entre ambientes
   refresh.py    pipeline: detecção → releases → EOL → snapshot diário → alertas

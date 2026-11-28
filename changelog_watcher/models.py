@@ -130,7 +130,7 @@ class Deployment(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     environment_id: Mapped[int] = mapped_column(ForeignKey("environments.id", ondelete="CASCADE"), index=True)
-    version_source: Mapped[str] = mapped_column(String(20), default="manual")  # manual|prometheus
+    version_source: Mapped[str] = mapped_column(String(20), default="manual")  # manual|prometheus|k8s...
     manual_version: Mapped[str | None] = mapped_column(String(100), default=None)
     namespace_override: Mapped[str | None] = mapped_column(String(200), default=None)
     workload_name_override: Mapped[str | None] = mapped_column(String(200), default=None)
@@ -146,7 +146,7 @@ class Deployment(Base):
 
     @property
     def current_version(self) -> str | None:
-        if self.version_source == "prometheus":
+        if self.version_source != "manual":
             return self.detected_version or self.manual_version
         return self.manual_version
 

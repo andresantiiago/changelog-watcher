@@ -102,7 +102,9 @@ class WatcherCollector(Collector):
             labels=["project", "environment"],
         )
         det_err = GaugeMetricFamily(
-            P + "app_detection_error", "1 if the Prometheus detection failed", labels=["project", "environment"]
+            P + "app_detection_error",
+            "1 if the version detection (Prometheus, Kubernetes API, Argo CD, Flux) failed",
+            labels=["project", "environment"],
         )
         eol_level = GaugeMetricFamily(
             P + "app_eol_level",
@@ -137,7 +139,7 @@ class WatcherCollector(Collector):
             outdated_days.add_metric(lbl, st.outdated_days)
             if st.libyears is not None:
                 libyears.add_metric(lbl, st.libyears)
-            if st.version_source == "prometheus":
+            if st.version_source != "manual":
                 det_err.add_metric(lbl, 1 if st.detection_error else 0)
             if st.eol_status:
                 eol_lbl = lbl + [st.eol_product or "", st.eol_cycle or ""]
