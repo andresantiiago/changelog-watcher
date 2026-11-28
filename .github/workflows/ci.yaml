@@ -134,6 +134,17 @@ jobs:
           echo "$OUT" | grep -q 'claimName: data'
           echo "$OUT" | grep -q 'name: cw-auth, key: AUTH_PASSWORD'
           echo "$OUT" | grep -q 'secretName: cw-tls'
+          # IngressRoute (Traefik) e HTTPRoute (Gateway API); casos inválidos falham com a mensagem certa
+          helm template ci $C --set ingress.enabled=true --set ingress.type=ingressroute \
+            --set 'ingress.ingressRoute.entryPoints[0]=websecure' --set ingress.ingressRoute.tls.secretName=cw-tls | kc
+          helm template ci $C --set ingress.enabled=true --set ingress.type=httproute \
+            --set 'ingress.httpRoute.parentRefs[0].name=public' --set 'ingress.httpRoute.parentRefs[0].sectionName=https' | kc
+          fails() { { helm template ci $C --set ingress.enabled=true "${@:2}" 2>&1 || true; } | grep -q "$1"; }
+          fails 'parentRefs is required' --set ingress.type=httproute
+          fails 'ingress.type must be' --set ingress.type=nope
+          fails 'must not contain backticks' --set ingress.type=ingressroute \
+            --set 'ingress.hosts[0].host=a`) || PathPrefix(`/' --set 'ingress.hosts[0].paths[0].path=/' \
+            --set 'ingress.hosts[0].paths[0].pathType=Prefix'
           # frontend: Ingress aponta para o nginx, que o NetworkPolicy deixa chegar no backend
           OUT=$(helm template ci $C --set frontend.enabled=true --set ingress.enabled=true \
             --set networkPolicy.prometheus.enabled=true --set metrics.serviceMonitor.enabled=true)

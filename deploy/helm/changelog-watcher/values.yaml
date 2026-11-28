@@ -52,14 +52,31 @@ service:
 
 ingress:
   enabled: false
+  # ingress (networking.k8s.io Ingress, default), ingressroute (Traefik IngressRoute,
+  # traefik.io/v1alpha1) or httproute (Gateway API HTTPRoute, gateway.networking.k8s.io/v1).
+  # hosts and annotations apply to all three; className and tls only to the Ingress. Ingress
+  # controller annotations (traefik.ingress.kubernetes.io/*, cert-manager.io/*) are ignored by the
+  # other two: set entry points, TLS and middlewares in ingressRoute, and TLS on the Gateway.
+  type: ingress
   className: ""
   annotations: {}
   hosts:
     - host: changelog-watcher.local
       paths:
         - path: /
-          pathType: Prefix
+          pathType: Prefix    # Prefix or Exact
   tls: []
+  ingressRoute:
+    # Set it (e.g. [websecure]) together with tls: empty = every Traefik entry point, plain HTTP
+    # included (Basic Auth sends the password on every request).
+    entryPoints: []
+    middlewares: []         # e.g. [{name: auth-headers}]
+    tls: {}                 # e.g. {secretName: cw-tls} or {certResolver: letsencrypt}
+  httpRoute:
+    # Gateway to attach to (required); TLS is configured on the Gateway listener. Point
+    # sectionName (or port) at the HTTPS listener: without it the route also binds to HTTP ones.
+    # All paths apply to all hosts here (HTTPRoute hostnames are per route).
+    parentRefs: []          # e.g. [{name: public, namespace: gateway-system, sectionName: https}]
 
 resources:
   requests:

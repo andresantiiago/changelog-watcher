@@ -1,4 +1,6 @@
 {{- if .Values.ingress.enabled }}
+{{- $type := .Values.ingress.type | default "ingress" }}
+{{- if eq $type "ingress" }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -24,10 +26,78 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                {{- /* frontend: nginx serves the UI and proxies the rest (/api, /docs...) to the backend */}}
-                name: {{ include "cw.fullname" $ }}{{ if $.Values.frontend.enabled }}-frontend{{ end }}
+                name: {{ include "cw.routeService" $ }}
                 port:
                   name: http
           {{- end }}
     {{- end }}
+{{- else if eq $type "ingressroute" }}
+{{- include "cw.checkRouteHosts" . }}
+{{- $r := .Values.ingress.ingressRoute | default dict }}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "cw.fullname" $ }}
+  labels: {{- include "cw.labels" $ | nindent 4 }}
+  {{- with $.Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $r.entryPoints }}
+  entryPoints: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  routes:
+    {{- range $.Values.ingress.hosts }}
+    {{- $host := .host }}
+    {{- range .paths }}
+    {{- $path := printf "%s(`%s`)" (ternary "Path" "PathPrefix" (eq .pathType "Exact")) .path }}
+    - kind: Rule
+      match: {{ ternary $path (printf "Host(`%s`) && %s" $host $path) (empty $host) | quote }}
+      {{- with $r.middlewares }}
+      middlewares: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      services:
+        - kind: Service
+          name: {{ include "cw.routeService" $ }}
+          port: http
+    {{- end }}
+    {{- end }}
+  {{- with $r.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- else if eq $type "httproute" }}
+{{- include "cw.checkRouteHosts" . }}
+{{- $r := .Values.ingress.httpRoute | default dict }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "cw.fullname" $ }}
+  labels: {{- include "cw.labels" $ | nindent 4 }}
+  {{- with $.Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not $r.parentRefs }}{{ fail "ingress.httpRoute.parentRefs is required (the Gateway to attach to)" }}{{ end }}
+  parentRefs: {{- toYaml $r.parentRefs | nindent 4 }}
+  {{- /* an empty host matches any host (as in the Ingress): then no hostnames at all */}}
+  {{- $hosts := list }}
+  {{- range $.Values.ingress.hosts }}{{ $hosts = append $hosts (.host | default "") }}{{ end }}
+  {{- if and $hosts (not (has "" $hosts)) }}
+  hostnames: {{- toYaml $hosts | nindent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        {{- range $.Values.ingress.hosts }}
+        {{- range .paths }}
+        - path:
+            type: {{ ternary "Exact" "PathPrefix" (eq .pathType "Exact") }}
+            value: {{ .path | quote }}
+        {{- end }}
+        {{- end }}
+      backendRefs:
+        - name: {{ include "cw.routeService" $ }}
+          port: {{ $.Values.service.port }}
+{{- else }}
+{{- fail (printf "ingress.type must be ingress, ingressroute or httproute (got %q)" $type) }}
+{{- end }}
 {{- end }}

@@ -1,3 +1,8 @@
+{{- /* URL prefix for the access line: the TLS setting of the chosen route type; for an HTTPRoute
+     the scheme depends on the Gateway listener, so only the host is shown. */}}
+{{- $type := .Values.ingress.type | default "ingress" }}
+{{- $tls := ternary .Values.ingress.tls (.Values.ingress.ingressRoute | default dict).tls (eq $type "ingress") }}
+{{- $prefix := ternary "" (printf "http%s://" (ternary "s" "" (not (empty $tls)))) (eq $type "httproute") }}
 {{- if eq (include "cw.lang" .) "pt-BR" -}}
 Changelog Watcher instalado!
 
@@ -8,10 +13,10 @@ ATENÇÃO: banco em memória (persistence.type=inMemory) – os dados serão PER
 {{- end }}
 
 {{- if .Values.ingress.enabled }}
-Acesse: {{ range .Values.ingress.hosts }}http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
+Acesse: {{ range $i, $h := .Values.ingress.hosts }}{{ if $i }} {{ end }}{{ $prefix }}{{ $h.host | default "*" }}{{ end }}{{ if eq $type "httproute" }} (http ou https conforme o listener do Gateway){{ end }}
 {{- else }}
 Acesse localmente:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }}{{ if .Values.frontend.enabled }}-frontend{{ end }} 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.routeService" . }} 8080:{{ .Values.service.port }}
   abra http://localhost:8080
 {{- end }}
 
@@ -44,10 +49,10 @@ WARNING: in-memory database (persistence.type=inMemory) – data is LOST when th
 {{- end }}
 
 {{- if .Values.ingress.enabled }}
-Open: {{ range .Values.ingress.hosts }}http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
+Open: {{ range $i, $h := .Values.ingress.hosts }}{{ if $i }} {{ end }}{{ $prefix }}{{ $h.host | default "*" }}{{ end }}{{ if eq $type "httproute" }} (http or https depending on the Gateway listener){{ end }}
 {{- else }}
 Open locally:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }}{{ if .Values.frontend.enabled }}-frontend{{ end }} 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.routeService" . }} 8080:{{ .Values.service.port }}
   then http://localhost:8080
 {{- end }}
 

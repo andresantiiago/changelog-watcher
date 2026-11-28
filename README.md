@@ -352,8 +352,40 @@ dashboard ConfigMap and the [frontend](#frontend-ui-in-its-own-deployment).
 The UI/API requires Basic Auth by default (`auth.enabled: true`). Without `auth.password` or
 `auth.existingSecret`, the chart generates a random password in the Secret (kept across
 upgrades); the command to read it shows up in the `helm install` notes. Use TLS on the Ingress
-(`ingress.tls`): the password goes in every request. For SSO, see
-[SSO login (OIDC / Dex)](#sso-login-oidc--dex) (`auth.oidc`).
+(`ingress.tls`, `ingress.ingressRoute.tls` or the Gateway's HTTPS listener): the password goes in
+every request. For SSO, see [SSO login (OIDC / Dex)](#sso-login-oidc--dex) (`auth.oidc`).
+
+#### Ingress, IngressRoute or HTTPRoute
+
+`ingress.type` picks how the UI is exposed (with `ingress.enabled: true`); `ingress.hosts`
+(`Prefix` or `Exact` paths) and `ingress.annotations` apply to all three:
+
+| `ingress.type` | Resource | Specific values |
+|---|---|---|
+| `ingress` (default) | `networking.k8s.io/v1` Ingress | `ingress.className`, `ingress.tls` |
+| `ingressroute` | Traefik `traefik.io/v1alpha1` IngressRoute | `ingress.ingressRoute.entryPoints`, `.middlewares`, `.tls` (e.g. `{secretName: cw-tls}` or `{certResolver: letsencrypt}`) |
+| `httproute` | Gateway API `gateway.networking.k8s.io/v1` HTTPRoute | `ingress.httpRoute.parentRefs` (required; TLS is set on the Gateway listener) |
+
+```yaml
+ingress:
+  enabled: true
+  type: httproute
+  hosts:
+    - host: changelog-watcher.example.com
+      paths: [{path: /, pathType: Prefix}]
+  httpRoute:
+    parentRefs: [{name: public, namespace: gateway-system, sectionName: https}]
+```
+
+- Ingress controller annotations (`traefik.ingress.kubernetes.io/*`, `cert-manager.io/*`) don't
+  apply to IngressRoute or HTTPRoute: set entry points, TLS and middlewares in
+  `ingress.ingressRoute`, and TLS on the Gateway.
+- IngressRoute: set `entryPoints` (e.g. `[websecure]`) with `tls`; empty means every Traefik entry
+  point, plain HTTP included. Traefik's `PathPrefix` is a string prefix (`/api` also matches
+  `/apiary`).
+- HTTPRoute: point `sectionName` (or `port`) at the HTTPS listener, otherwise the route also binds
+  to HTTP listeners. All paths apply to all hosts.
+- Both accept only `Prefix`/`Exact` paths, and hosts/paths can't contain backticks.
 
 #### NetworkPolicies
 
