@@ -13,8 +13,8 @@ from prometheus_client import Counter, Histogram
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from . import kube, safehttp
 from . import prometheus as prom
-from . import safehttp
 from .alerts import send_alerts
 from .analysis import compute_statuses, load_environments, pv, summarize
 from .config import get_settings
@@ -29,7 +29,9 @@ log = logging.getLogger(__name__)
 REFRESH_TOTAL = Counter("changelog_watcher_refresh_runs", "Refresh runs", ["result"])
 SOURCE_FETCH = Counter("changelog_watcher_source_fetches", "Release source fetches", ["source_type", "result"])
 DETECTIONS = Counter(
-    "changelog_watcher_prometheus_detections", "Version detections via Prometheus", ["environment", "result"]
+    "changelog_watcher_prometheus_detections",
+    "Version detections (Prometheus, Kubernetes API, Argo CD, Flux)",
+    ["environment", "result"],
 )
 REFRESH_DURATION = Histogram(
     "changelog_watcher_refresh_duration_seconds", "Duration of a refresh run", buckets=(1, 5, 15, 30, 60, 120, 300, 600)
@@ -117,7 +119,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
         stmt = (
             select(Deployment)
             .options(selectinload(Deployment.project), selectinload(Deployment.environment))
-            .where(Deployment.version_source == "prometheus")
+            .where(Deployment.version_source != "manual")
         )
         deps = [d for d in s.scalars(stmt) if d.project.enabled and (not project_ids or d.project_id in project_ids)]
         for d in deps:
@@ -128,7 +130,7 @@ async def detect_versions(project_ids: list[int] | None = None) -> tuple[int, in
     async def one(dep: Deployment):
         async with sem:
             try:
-                det = await prom.detect(dep.project, dep, dep.environment)
+                det = await kube.detect(dep.project, dep, dep.environment)
                 return dep.id, det, None
             except prom.PrometheusError as exc:
                 return dep.id, None, str(exc)

@@ -22,7 +22,7 @@ DETECTION_MODES = {
 SourceType = Literal[tuple(SOURCE_TYPES)]  # type: ignore[valid-type]
 DetectionMode = Literal[tuple(DETECTION_MODES)]  # type: ignore[valid-type]
 WorkloadKind = Literal["deployment", "statefulset", "daemonset", "cronjob"]
-VersionSource = Literal["manual", "prometheus"]
+VersionSource = Literal["manual", "prometheus", "kubernetes", "argocd", "flux"]
 WebhookKind = Literal[tuple(WEBHOOK_KINDS)]  # type: ignore[valid-type]
 
 
