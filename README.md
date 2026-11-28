@@ -186,9 +186,11 @@ fields) and its **Namespace**/**name** (overridable per environment) point to th
 
 Ranges (`1.2.*`), branches and commits are skipped. The **Version pattern** regex also applies.
 A ServiceAccount with read-only RBAC is needed: `rbac.create=true` in the Helm chart (a ClusterRole,
-or Roles in the `rbac.namespaces` listed). Errors (not found, no permission, not in a cluster...)
-show up as the deployment's detection error, and **Test detection** works the same way. With
-NetworkPolicies enabled, also allow the egress to the API server.
+or Roles in the `rbac.namespaces` listed). Prefer listing the namespaces: the ClusterRole lets the
+pod read workload specs and Argo CD/Flux Helm values in every namespace, and those often hold
+plain-text secrets. Errors (not found, no permission, not in a cluster...) show up as the
+deployment's detection error, and **Test detection** works the same way. With NetworkPolicies
+enabled, also allow the egress to the API server.
 
 ### Helm releases and cluster discovery
 

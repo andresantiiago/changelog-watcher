@@ -27,6 +27,10 @@ Usuário: {{ .Values.auth.username }} – senha gerada no Secret {{ include "cw.
   kubectl -n {{ .Release.Namespace }} get secret {{ include "cw.secretName" . }} -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d
 {{- end }}
 
+{{- if and .Values.rbac.create (not .Values.rbac.namespaces) }}
+ATENÇÃO: rbac.namespaces está vazio: o ClusterRole deixa este pod ler as specs dos workloads (valores de env) e os Helm values do Argo CD/Flux em todos os namespaces. Liste os namespaces que você acompanha (rbac.namespaces) para limitar.
+{{- end }}
+
 {{- with .Values.networkPolicy.prometheus }}
 {{- if and .enabled $.Values.frontend.enabled }}
 ATENÇÃO: o frontend não tem NetworkPolicy própria: qualquer pod alcança a UI/API por ele (com autenticação; /metrics não passa por ele).
@@ -61,6 +65,10 @@ WARNING: authentication is off (auth.enabled=false and auth.oidc.enabled=false):
 {{- else if and .Values.auth.enabled (not (or .Values.auth.password .Values.auth.existingSecret)) }}
 User: {{ .Values.auth.username }} – password generated in the Secret {{ include "cw.secretName" . }}:
   kubectl -n {{ .Release.Namespace }} get secret {{ include "cw.secretName" . }} -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d
+{{- end }}
+
+{{- if and .Values.rbac.create (not .Values.rbac.namespaces) }}
+WARNING: rbac.namespaces is empty: the ClusterRole lets this pod read workload specs (env values) and Argo CD/Flux Helm values in every namespace. List the namespaces you track (rbac.namespaces) to limit it.
 {{- end }}
 
 {{- with .Values.networkPolicy.prometheus }}

@@ -23,7 +23,9 @@ serviceAccount:
 # With networkPolicy on, also allow the egress to the API server (the chart does not know its address).
 rbac:
   create: false
-  # [] = one ClusterRole (every namespace). Otherwise a Role + RoleBinding in each listed namespace.
+  # [] = one ClusterRole: get on workloads, Applications and HelmReleases of EVERY namespace, whose
+  # specs may hold plain-text secrets (env values, inline Helm values). Prefer listing the namespaces
+  # you track: a Role + RoleBinding in each one.
   namespaces: []
   #  - production
   #  - argocd
