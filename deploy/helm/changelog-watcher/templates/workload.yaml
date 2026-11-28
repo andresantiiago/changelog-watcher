@@ -39,6 +39,7 @@ spec:
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
       serviceAccountName: {{ include "cw.serviceAccountName" . }}
+      automountServiceAccountToken: {{ or .Values.rbac.create .Values.serviceAccount.automountToken }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -95,9 +96,33 @@ spec:
             {{- end }}
             - name: DATABASE_URL
               value: {{ ternary "sqlite:////data/changelog-watcher.db" "sqlite:///:memory:" $pvc | quote }}
-            {{- if not .Values.auth.enabled }}
+            {{- if not (or .Values.auth.enabled (dig "oidc" "enabled" false .Values.auth)) }}
             - name: AUTH_DISABLED
               value: "true"
+            {{- end }}
+            {{- with .Values.auth.oidc }}
+            {{- if .enabled }}
+            {{- if not $.Values.config.publicUrl }}{{ fail "auth.oidc needs config.publicUrl (redirect URI)" }}{{ end }}
+            {{- if not (or .editorGroups .viewerGroups) }}{{ fail "auth.oidc needs editorGroups and/or viewerGroups" }}{{ end }}
+            - name: OIDC_ISSUER_URL
+              value: {{ required "auth.oidc.issuerUrl is required" .issuerUrl | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .clientId | default "changelog-watcher" | quote }}
+            - name: OIDC_SCOPES
+              value: {{ .scopes | default "openid email profile groups" | quote }}
+            - name: OIDC_EDITOR_GROUPS
+              value: {{ join "," .editorGroups | quote }}
+            - name: OIDC_VIEWER_GROUPS
+              value: {{ join "," .viewerGroups | quote }}
+            - name: SESSION_MAX_AGE_HOURS
+              value: {{ .sessionMaxAgeHours | default 12 | quote }}
+            {{- with .existingSecret }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: {{ . }}, key: OIDC_CLIENT_SECRET}}
+            - name: SESSION_SECRET
+              valueFrom: {secretKeyRef: {name: {{ . }}, key: SESSION_SECRET}}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if and .Values.auth.enabled .Values.auth.existingSecret }}
             - name: AUTH_USERNAME

@@ -17,8 +17,10 @@ jobs:
 
   # Merge na main: imagem e chart Helm têm versões separadas. .github/scripts/release_version.py
   # vê o que mudou desde a última tag de cada um: imagem (changelog_watcher/, Dockerfile,
-  # pyproject.toml) -> tag vX.Y.Z, imagem no GHCR e release; chart (deploy/helm/changelog-watcher/)
-  # -> tag chart-vX.Y.Z e release. Nova imagem também gera versão do chart (appVersion).
+  # pyproject.toml; static/ sozinho não conta) -> tag vX.Y.Z, imagem no GHCR e release; chart
+  # (deploy/helm/changelog-watcher/, a UI changelog_watcher/static/ e frontend/) -> tag
+  # chart-vX.Y.Z, release e imagem do frontend vX.Y.Z (a do chart): mudança só de UI não
+  # reinicia o backend. Nova imagem também gera versão do chart (appVersion).
   # Docs, testes e CI não geram versão: esperam a próxima release de imagem ou chart.
   # Versão: PR vindo da branch release-vX.Y.Z -> vX.Y.Z (imagem e chart); outra branch -> bugfix
   # (patch). O Copilot escreve as notas; o script sincroniza pyproject.toml/Chart.yaml e o
@@ -34,6 +36,7 @@ jobs:
       pull-requests: read  # branch do PR que gerou o commit
     outputs:
       app_version: ${{ steps.v.outputs.app_version }}
+      chart_version: ${{ steps.v.outputs.chart_version }}
       chart_tag: ${{ steps.v.outputs.chart_tag }}
       prerelease: ${{ steps.v.outputs.prerelease }}
       app_notes: ${{ steps.v.outputs.app_notes }}
@@ -157,18 +160,63 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Roda mesmo sem imagem (só o chart mudou); não roda se a imagem falhou. As notas vêm sempre
-  # do script (Copilot ou commits desde a tag do componente), não de --generate-notes.
+  # Imagem do frontend (UI em nginx) a cada versão do chart, com a versão do chart como tag
+  # (frontend.image.tag padrão do chart).
+  frontend:
+    needs: version
+    if: needs.version.outputs.chart_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.chart_tag }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
+          tags: |
+            type=raw,value=${{ needs.version.outputs.chart_version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          load: true
+          tags: changelog-watcher-frontend:scan
+      - name: Trivy (CRITICAL com correção)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2
+          image --exit-code 1 --severity CRITICAL --ignore-unfixed --no-progress changelog-watcher-frontend:scan
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # Cada release só sai se a sua imagem saiu: a da imagem não depende do frontend; a do chart
+  # precisa do frontend e de que a imagem (appVersion) não tenha falhado. As notas vêm sempre do
+  # script (Copilot ou commits desde a tag do componente), não de --generate-notes.
   release:
-    needs: [version, image]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.image.result != 'failure' }}
+    needs: [version, image, frontend]
+    if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
       REPO: ${{ github.repository }}
     steps:
       - name: Release da imagem
-        if: needs.version.outputs.app_version != ''
+        if: needs.version.outputs.app_version != '' && needs.image.result == 'success'
         env:
           V: ${{ needs.version.outputs.app_version }}
           NOTES: ${{ needs.version.outputs.app_notes }}
@@ -177,7 +225,7 @@ jobs:
           printf '%s\n' "$NOTES" > notes.md
           gh release create "$V" --repo "$REPO" --title "$V" --verify-tag --notes-file notes.md $PRE
       - name: Release do chart
-        if: needs.version.outputs.chart_tag != ''
+        if: needs.version.outputs.chart_tag != '' && needs.image.result != 'failure' && needs.frontend.result == 'success'
         env:
           V: ${{ needs.version.outputs.chart_tag }}
           NOTES: ${{ needs.version.outputs.chart_notes }}

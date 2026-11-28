@@ -17,6 +17,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "pyyaml>=6",
     "pydantic>=2.5",
+    "pyjwt[crypto]>=2.10",  # OIDC ID token (JWKS) and session cookie signatures
 ]
 
 [project.optional-dependencies]
@@ -51,6 +52,6 @@ ignore = ["B008"]  # Depends()/Query() em default de argumento é o padrão do F
 
 [tool.mypy]
 # Começa pela classificação de versões; amplie a lista conforme os módulos forem tipados.
-files = ["changelog_watcher/versioning.py"]
+files = ["changelog_watcher/versioning.py", "changelog_watcher/auth.py"]
 follow_imports = "silent"
 ignore_missing_imports = true

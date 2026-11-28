@@ -1,7 +1,7 @@
-# Mantém o digest da imagem base (Dockerfile) atualizado.
+# Mantém o digest das imagens base (Dockerfile e frontend/Dockerfile) atualizado.
 version: 2
 updates:
   - package-ecosystem: docker
-    directory: /
+    directories: [/, /frontend]
     schedule:
       interval: weekly

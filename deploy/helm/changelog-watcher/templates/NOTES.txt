@@ -16,19 +16,21 @@ ATENÇÃO: banco em memória (persistence.type=inMemory) – os dados serão PER
 Acesse: {{ range $i, $h := .Values.ingress.hosts }}{{ if $i }} {{ end }}{{ $prefix }}{{ $h.host | default "*" }}{{ end }}{{ if eq $type "httproute" }} (http ou https conforme o listener do Gateway){{ end }}
 {{- else }}
 Acesse localmente:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }} 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.routeService" . }} 8080:{{ .Values.service.port }}
   abra http://localhost:8080
 {{- end }}
 
-{{- if not .Values.auth.enabled }}
-ATENÇÃO: autenticação desligada (auth.enabled=false): qualquer um que alcance o serviço pode alterar a configuração.
-{{- else if not (or .Values.auth.password .Values.auth.existingSecret) }}
+{{- if not (or .Values.auth.enabled (dig "oidc" "enabled" false .Values.auth)) }}
+ATENÇÃO: autenticação desligada (auth.enabled=false e auth.oidc.enabled=false): qualquer um que alcance o serviço pode alterar a configuração.
+{{- else if and .Values.auth.enabled (not (or .Values.auth.password .Values.auth.existingSecret)) }}
 Usuário: {{ .Values.auth.username }} – senha gerada no Secret {{ include "cw.secretName" . }}:
   kubectl -n {{ .Release.Namespace }} get secret {{ include "cw.secretName" . }} -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d
 {{- end }}
 
 {{- with .Values.networkPolicy.prometheus }}
-{{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
+{{- if and .enabled $.Values.frontend.enabled }}
+ATENÇÃO: o frontend não tem NetworkPolicy própria: qualquer pod alcança a UI/API por ele (com autenticação; /metrics não passa por ele).
+{{- else if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
 ATENÇÃO: networkPolicy.prometheus está ligada sem allowIngressFrom: o Ingress não alcança o pod.
 {{- end }}
 {{- end }}
@@ -50,19 +52,21 @@ WARNING: in-memory database (persistence.type=inMemory) – data is LOST when th
 Open: {{ range $i, $h := .Values.ingress.hosts }}{{ if $i }} {{ end }}{{ $prefix }}{{ $h.host | default "*" }}{{ end }}{{ if eq $type "httproute" }} (http or https depending on the Gateway listener){{ end }}
 {{- else }}
 Open locally:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.fullname" . }} 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cw.routeService" . }} 8080:{{ .Values.service.port }}
   then http://localhost:8080
 {{- end }}
 
-{{- if not .Values.auth.enabled }}
-WARNING: authentication is off (auth.enabled=false): anyone who reaches the service can change the configuration.
-{{- else if not (or .Values.auth.password .Values.auth.existingSecret) }}
+{{- if not (or .Values.auth.enabled (dig "oidc" "enabled" false .Values.auth)) }}
+WARNING: authentication is off (auth.enabled=false and auth.oidc.enabled=false): anyone who reaches the service can change the configuration.
+{{- else if and .Values.auth.enabled (not (or .Values.auth.password .Values.auth.existingSecret)) }}
 User: {{ .Values.auth.username }} – password generated in the Secret {{ include "cw.secretName" . }}:
   kubectl -n {{ .Release.Namespace }} get secret {{ include "cw.secretName" . }} -o jsonpath='{.data.AUTH_PASSWORD}' | base64 -d
 {{- end }}
 
 {{- with .Values.networkPolicy.prometheus }}
-{{- if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
+{{- if and .enabled $.Values.frontend.enabled }}
+WARNING: the frontend has no NetworkPolicy of its own: any pod reaches the UI/API through it (authenticated; /metrics is not proxied).
+{{- else if and .enabled $.Values.ingress.enabled (not .allowIngressFrom) }}
 WARNING: networkPolicy.prometheus is on without allowIngressFrom: the Ingress cannot reach the pod.
 {{- end }}
 {{- end }}

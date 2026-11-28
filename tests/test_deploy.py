@@ -1,5 +1,7 @@
-"""Consistency checks for the deployment artifacts (Grafana dashboard / Helm chart)."""
+"""Consistency checks for the deployment artifacts (Grafana dashboard / Helm chart / frontend)."""
 
+import base64
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -43,3 +45,12 @@ def test_example_config_loads(client):
     projects = {p["name"]: p for p in client.get("/api/projects").json()}
     assert projects["postgres"]["version_scheme"] == "major_patch"
     assert projects["my-api"]["deployments"][0]["manual_version"] == "2.3.1"
+
+
+def test_frontend_csp_allows_the_inline_scripts():
+    """Editing index.html's inline script must update the sha256 in the frontend's CSP."""
+    html = (ROOT / "changelog_watcher/static/index.html").read_text()
+    conf = (ROOT / "frontend/default.conf.template").read_text()
+    for script in re.findall(r"<script>(.*?)</script>", html, re.S):
+        digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+        assert f"'sha256-{digest}'" in conf

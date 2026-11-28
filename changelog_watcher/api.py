@@ -6,13 +6,13 @@ from itertools import islice
 
 import httpx
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import eol, i18n, logstore, safehttp
+from . import eol, i18n, kube, logstore, safehttp
 from . import prometheus as prom
 from .analysis import (
     AGE_BUCKETS,
@@ -113,6 +113,13 @@ def meta(db: Session = Depends(get_db)):
         "tolerance": global_tolerance(db),
         "public_url": s.public_url,
     }
+
+
+@router.get("/me")
+def me(request: Request):
+    """Who is logged in and whether they may edit (no user: authentication disabled)."""
+    user = getattr(request.state, "user", None) or {"name": None, "edit": True, "auth": None}
+    return {"name": user["name"], "can_edit": user["edit"], "auth": user["auth"]}
 
 
 # ----------------------------------------------------------- environments
@@ -330,21 +337,22 @@ def project_changelog(
 
 @router.post("/projects/{project_id}/detect")
 async def preview_detection(project_id: int, environment_id: int, db: Session = Depends(get_db)):
-    """Run the Prometheus detection once without saving (used by the UI 'testar' button)."""
+    """Run the version detection (Prometheus, Kubernetes API, Argo CD or Flux) once without saving (used by the UI 'testar' button)."""
     project = _get(db, Project, project_id)
     env = _get(db, Environment, environment_id)
     dep = db.scalar(
         select(Deployment).where(Deployment.project_id == project_id, Deployment.environment_id == environment_id)
     )
     try:
-        det = await prom.detect(project, dep, env)
+        det = await kube.detect(project, dep, env)
         return {"ok": True, "query": det.query, "image": det.image, "version": det.version, "images": det.images}
     except prom.PrometheusError as exc:
         query = None
-        try:
-            query = prom.build_query(project, dep, env)
-        except prom.PrometheusError:
-            pass
+        if not dep or dep.version_source not in kube.KUBE_SOURCES:
+            try:
+                query = prom.build_query(project, dep, env)
+            except prom.PrometheusError:
+                pass
         return {"ok": False, "error": str(exc), "query": query}
 
 

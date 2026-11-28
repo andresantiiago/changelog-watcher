@@ -1,0 +1,61 @@
+{{- define "cw.rbacRules" -}}
+- apiGroups: [apps]
+  resources: [deployments, statefulsets, daemonsets]
+  verbs: [get]
+- apiGroups: [argoproj.io]
+  resources: [applications]
+  verbs: [get]
+- apiGroups: [helm.toolkit.fluxcd.io]
+  resources: [helmreleases]
+  verbs: [get]
+{{- end -}}
+
+{{- if .Values.rbac.create }}
+{{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.name) }}
+{{- fail "rbac.create needs its own ServiceAccount: set serviceAccount.create=true or serviceAccount.name (never bind the namespace's default one)" }}
+{{- end }}
+{{- $cname := printf "%s-%s-reader" .Release.Namespace (include "cw.fullname" .) }}
+{{- $subject := dict "kind" "ServiceAccount" "name" (include "cw.serviceAccountName" .) "namespace" .Release.Namespace }}
+{{- if .Values.rbac.namespaces }}
+{{- range .Values.rbac.namespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cw.fullname" $ }}-reader
+  namespace: {{ . }}
+  labels: {{- include "cw.labels" $ | nindent 4 }}
+rules: {{- include "cw.rbacRules" $ | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cw.fullname" $ }}-reader
+  namespace: {{ . }}
+  labels: {{- include "cw.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cw.fullname" $ }}-reader
+subjects: [{{ toJson $subject }}]
+---
+{{- end }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $cname }}
+  labels: {{- include "cw.labels" . | nindent 4 }}
+rules: {{- include "cw.rbacRules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $cname }}
+  labels: {{- include "cw.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $cname }}
+subjects: [{{ toJson $subject }}]
+{{- end }}
+{{- end }}

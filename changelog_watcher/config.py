@@ -24,6 +24,10 @@ def _limit(value: str | None, default: int) -> int | None:
     return None if value.strip().lower() in {"off", "false", "no", "none"} else int(value)
 
 
+def _list(value: str | None) -> tuple[str, ...]:
+    return tuple(x.strip() for x in (value or "").split(",") if x.strip())
+
+
 @dataclass
 class Settings:
     database_url: str = "sqlite:///./data/changelog-watcher.db"
@@ -45,6 +49,15 @@ class Settings:
     auth_username: str | None = None
     auth_password: str | None = None
     auth_disabled: bool = False
+    # OIDC login (enabled when any OIDC_* below is set; see auth.check_config)
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_scopes: str = "openid email profile groups"
+    oidc_editor_groups: tuple[str, ...] = ()
+    oidc_viewer_groups: tuple[str, ...] = ()
+    session_secret: str = ""
+    session_max_age_hours: float = 12.0
     metrics_token: str | None = None
     scheduler_enabled: bool = True
     metrics_cache_seconds: int = 30
@@ -82,6 +95,14 @@ class Settings:
             auth_username=e("AUTH_USERNAME") or None,
             auth_password=e("AUTH_PASSWORD") or None,
             auth_disabled=_bool(e("AUTH_DISABLED"), False),
+            oidc_issuer_url=e("OIDC_ISSUER_URL") or "",
+            oidc_client_id=e("OIDC_CLIENT_ID") or "",
+            oidc_client_secret=e("OIDC_CLIENT_SECRET") or "",
+            oidc_scopes=e("OIDC_SCOPES") or cls.oidc_scopes,
+            oidc_editor_groups=_list(e("OIDC_EDITOR_GROUPS")),
+            oidc_viewer_groups=_list(e("OIDC_VIEWER_GROUPS")),
+            session_secret=e("SESSION_SECRET") or "",
+            session_max_age_hours=float(e("SESSION_MAX_AGE_HOURS") or cls.session_max_age_hours),
             metrics_token=e("METRICS_TOKEN") or None,
             scheduler_enabled=_bool(e("SCHEDULER_ENABLED"), cls.scheduler_enabled),
             metrics_cache_seconds=int(e("METRICS_CACHE_SECONDS") or cls.metrics_cache_seconds),
@@ -108,7 +129,16 @@ _PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 # The app's own credentials: a placeholder must never resolve to them, or anyone able to edit
 # an environment/webhook could send them to a host of their choice.
 _APP_SECRETS = frozenset(
-    {"AUTH_USERNAME", "AUTH_PASSWORD", "GITHUB_TOKEN", "GITLAB_TOKEN", "METRICS_TOKEN", "DATABASE_URL"}
+    {
+        "AUTH_USERNAME",
+        "AUTH_PASSWORD",
+        "GITHUB_TOKEN",
+        "GITLAB_TOKEN",
+        "METRICS_TOKEN",
+        "DATABASE_URL",
+        "OIDC_CLIENT_SECRET",
+        "SESSION_SECRET",
+    }
 )
 
 

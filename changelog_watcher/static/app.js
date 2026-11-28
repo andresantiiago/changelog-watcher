@@ -73,6 +73,11 @@ async function api(path, opts = {}) {
     init.headers["Content-Type"] = "application/json";
   }
   const res = await fetch(path, init);
+  // OIDC session expired (Basic Auth answers with a WWW-Authenticate challenge instead): sign in again
+  if (res.status === 401 && !res.headers.has("www-authenticate")) {
+    location.href = `/auth/login?next=${encodeURIComponent(location.pathname + location.hash)}`;
+    throw new Error(t("Session expired"));
+  }
   if (res.status === 204) return null;
   const ct = res.headers.get("content-type") || "";
   const data = ct.includes("json") ? await res.json() : await res.text();
@@ -389,6 +394,7 @@ function formData(form) {
   });
   return out;
 }
+const sourceLabel = (v) => ({ prometheus: "Prometheus", kubernetes: t("Kubernetes API"), argocd: "Argo CD", flux: "Flux" })[v] || t("manual");
 const opt = (value, label, selected) => `<option value="${esc(value)}" ${String(selected) === String(value) ? "selected" : ""}>${esc(label)}</option>`;
 const field = (label, input, hint = "", cls = "") => `<label class="field ${cls}">${esc(label)}${input}${hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
 const inp = (name, value, attrs = "") => `<input name="${name}" value="${esc(value ?? "")}" ${attrs}>`;
@@ -600,7 +606,7 @@ async function viewApps(view) {
       ${allTags.length ? `<select id="f-tag"><option value="">${t("All tags")}</option>${allTags.map((t) => opt(t, t, st.tag)).join("")}</select>` : ""}
       ${namespaces.length ? `<select id="f-ns" aria-label="Namespace"><option value="">${t("All namespaces")}</option>${namespaces.map((n) => opt(n, n, S.nsFilter)).join("")}</select>` : ""}
       <div class="spacer" style="flex:1"></div>
-      <button class="btn primary" id="new-app" type="button">${t("+ New application")}</button>
+      <button data-write class="btn primary" id="new-app" type="button">${t("+ New application")}</button>
     </div>
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>${t("Application")}</th><th>Namespace</th>${S.envs.map((e) => `<th>${esc(e.name)}</th>`).join("")}<th>${t("Latest")}</th><th></th></tr></thead>
@@ -637,7 +643,7 @@ async function viewApps(view) {
             ${s.detection_error ? `<span class="err" data-err="${esc(s.detection_error)}" title="${t("Click to see the error")}">${t("⚠ detection failed")}</span>` : ""}</div></td>`;
         }).join("")}
         <td>${ver(any?.latest_version)}<div class="small muted">${any?.latest_version_date ? fmtDate(any.latest_version_date) : ""}</div></td>
-        <td class="nowrap right"><button class="btn sm" data-refresh="${p.id}" type="button" title="${t("Fetch releases")}">↻</button> <button class="btn sm" data-edit="${p.id}" type="button">${t("Edit")}</button></td>
+        <td class="nowrap right"><button data-write class="btn sm" data-refresh="${p.id}" type="button" title="${t("Fetch releases")}">↻</button> <button data-write class="btn sm" data-edit="${p.id}" type="button">${t("Edit")}</button></td>
       </tr>`;
     }).join("") || `<tr><td colspan="${S.envs.length + 4}" class="empty">${S.projects.length ? t("No application matches these filters.") : t("No application added yet.")}</td></tr>`;
     bindRowLinks(body);
@@ -685,7 +691,7 @@ function projectForm(p = null, isNew = !p, hint = {}) {
       ${toleranceFields(p, S.meta.tolerance)}
       <p class="small muted full" style="margin:0">${t("empty = global value (Settings page)")}</p>
     </div></fieldset>
-    <fieldset><legend>${t("Discover the version in use via Prometheus")}</legend><div class="form-grid">
+    <fieldset><legend>${t("Discover the version in use")}</legend><div class="form-grid">
       ${field(t("Detection mode"), `<select name="detection_mode">${Object.entries(S.meta.detection_modes).map(([k, v]) => opt(k, v, p.detection_mode)).join("")}</select>`, t("uses <code>kube_pod_container_info</code> from kube-state-metrics"), "full")}
       <div data-mode="workload">${field(t("Workload type"), `<select name="workload_kind">${["deployment", "statefulset", "daemonset", "cronjob"].map((k) => opt(k, k, p.workload_kind)).join("")}</select>`)}</div>
       <div data-mode="workload helm image query">${field("Namespace", inp("workload_namespace", p.workload_namespace))}</div>
@@ -693,6 +699,7 @@ function projectForm(p = null, isNew = !p, hint = {}) {
       <div data-mode="workload helm image">${field("Container", inp("container_name", p.container_name), t("optional"))}</div>
       <div data-mode="helm image" class="full">${field(t("Image"), inp("image_pattern", p.image_pattern, 'placeholder="quay.io/argoproj/argocd"'), t("image repository or regex – in Helm mode (optional) picks which image of the release sets the version"))}</div>
       <div data-mode="query" class="full">${field(t("PromQL query"), `<textarea name="promql_query" placeholder='kube_pod_container_info{namespace="{namespace}", container="app"}'>${esc(p.promql_query || "")}</textarea>`, t("the series must have the <code>image</code> (or <code>version</code>) label; {namespace} and {name} are replaced"))}</div>
+      <p data-mode="workload" class="small muted full" style="margin:0">${t("With Kubernetes API, Argo CD or Flux as the version source (Environments, below), the namespace and name point to the workload, the Argo CD Application or the Flux HelmRelease.")}</p>
       <div data-mode="workload helm image query" class="full">${field(t("Version pattern in the image tag (regex)"), inp("image_version_pattern", p.image_version_pattern), t("optional, e.g. <code>^v?(\\d+\\.\\d+\\.\\d+)</code>"))}</div>
     </div></fieldset>
     <fieldset><legend>${t("Environments")}</legend>
@@ -702,7 +709,7 @@ function projectForm(p = null, isNew = !p, hint = {}) {
         const src = d?.version_source || (p.detection_mode !== "none" && e.prometheus_url ? "prometheus" : "manual");
         return `<tr data-dep="${e.id}"><td><b>${esc(e.name)}</b>${e.prometheus_url ? "" : `<div class="small muted">${t("no Prometheus")}</div>`}</td>
           <td><input type="checkbox" data-skip="1" data-f="on" ${d || isNew ? "checked" : ""}></td>
-          <td><select data-skip="1" data-f="version_source">${opt("manual", t("Manual"), src)}${opt("prometheus", "Prometheus", src)}</select></td>
+          <td><select data-skip="1" data-f="version_source">${opt("manual", t("Manual"), src)}${opt("prometheus", "Prometheus", src)}${opt("kubernetes", t("Kubernetes API"), src)}${opt("argocd", "Argo CD", src)}${opt("flux", "Flux", src)}</select></td>
           <td><input data-skip="1" data-f="manual_version" value="${esc(d?.manual_version || "")}" placeholder="1.2.3" style="width:110px"></td>
           <td><input data-skip="1" data-f="namespace_override" value="${esc(d?.namespace_override || "")}" style="width:140px"></td>
           <td><input data-skip="1" data-f="workload_name_override" value="${esc(d?.workload_name_override || "")}" style="width:140px"></td></tr>`;
@@ -798,13 +805,13 @@ async function viewAppDetail(view, id) {
         ${p.last_error ? `<div class="err" data-err="${esc(p.last_error)}" style="margin-top:6px">⚠ ${esc(p.last_error)}</div>` : ""}
         ${p.eol_error ? `<div class="err" data-err="${esc(p.eol_error)}" style="margin-top:6px">⚠ ${esc(p.eol_error)}</div>` : ""}
       </div>
-      <div class="row"><button class="btn" id="d-refresh" type="button">${t("↻ Fetch releases")}</button><button class="btn" id="d-edit" type="button">${t("Edit")}</button><button class="btn danger" id="d-del" type="button">${t("Delete")}</button></div></div>
+      <div class="row"><button data-write class="btn" id="d-refresh" type="button">${t("↻ Fetch releases")}</button><button data-write class="btn" id="d-edit" type="button">${t("Edit")}</button><button data-write class="btn danger" id="d-del" type="button">${t("Delete")}</button></div></div>
     </div>
     <div class="grid cols-${Math.min(Math.max(mine.length, 1), 3)}" style="margin-top:16px">
       ${mine.map((s) => `<div class="card">
         <div class="card-head"><h2>${esc(s.environment)}</h2>${badge(s.status, STATUS[s.status].label)}</div>
         <div class="row" style="align-items:baseline"><span class="small muted">${t("In use")}</span><span class="ver" style="font-size:20px;font-weight:600">${esc(s.current_version || "—")}</span><span class="small muted">${s.current_release_date ? t("published on {date}", { date: fmtDate(s.current_release_date) }) : ""}</span></div>
-        <div class="small muted" style="margin:6px 0 10px">${t("Source:")} ${s.version_source === "prometheus" ? `Prometheus${s.detected_at ? ` (${rel(s.detected_at)})` : ""}` : t("manual")}${s.detected_image ? `<br><span class="mono">${esc(s.detected_image)}</span>` : ""}</div>
+        <div class="small muted" style="margin:6px 0 10px">${t("Source:")} ${s.version_source !== "manual" ? `${sourceLabel(s.version_source)}${s.detected_at ? ` (${rel(s.detected_at)})` : ""}` : t("manual")}${s.detected_image ? `<br><span class="mono">${esc(s.detected_image)}</span>` : ""}</div>
         ${s.detection_error ? `<div class="err" data-err="${esc(s.detection_error)}" style="margin-bottom:8px">⚠ ${esc(s.detection_error)}</div>` : ""}
         <table><tbody>
           <tr><td class="muted">Bugfix</td><td>${s.latest_patch ? `${s.latest_patch_url ? `<a href="${esc(s.latest_patch_url)}" target="_blank" rel="noopener">${esc(s.latest_patch)}</a>` : esc(s.latest_patch)} <span class="small muted">(${t("{n} behind", { n: s.patch_behind })})</span>` : "—"}</td></tr>
@@ -816,7 +823,7 @@ async function viewAppDetail(view, id) {
         </tbody></table>
         <div class="row" style="margin-top:10px">
           ${s.versions_behind ? `<button class="btn sm" data-notes="${s.environment_id}" type="button">${t("See pending changelog ({n})", { n: s.versions_behind })}</button>` : ""}
-          ${p.detection_mode !== "none" ? `<button class="btn sm" data-detect="${s.environment_id}" type="button">${t("Test detection")}</button>` : ""}
+          ${p.detection_mode !== "none" || s.version_source !== "manual" ? `<button data-write class="btn sm" data-detect="${s.environment_id}" type="button">${t("Test detection")}</button>` : ""}
         </div>
         <div data-detect-out="${s.environment_id}" class="small" style="margin-top:8px"></div>
       </div>`).join("") || `<div class="card empty">${t("This application is not deployed in any environment. Edit it to set where it runs.")}</div>`}
@@ -935,8 +942,8 @@ async function viewReports(view, id) {
   const current = id ? await api(`/api/reports/${id}`) : reports[0] ? await api(`/api/reports/${reports[0].id}`) : null;
   view.innerHTML = `
     <div class="filters">
-      <button class="btn" id="r-gen" type="button">${t("Generate preview")}</button>
-      <button class="btn primary" id="r-send" type="button">${t("Generate and send to webhooks")}</button>
+      <button data-write class="btn" id="r-gen" type="button">${t("Generate preview")}</button>
+      <button data-write class="btn primary" id="r-send" type="button">${t("Generate and send to webhooks")}</button>
       <span class="muted small">${t("Automatic delivery:")} <code>${esc(S.meta.schedule.report_cron)}</code> (${esc(S.meta.schedule.timezone)})${S.meta.schedule.next_runs?.weekly_report ? ` · ${t("next {when}", { when: fmtDate(S.meta.schedule.next_runs.weekly_report, true) })}` : ""}</span>
     </div>
     <div class="grid" style="grid-template-columns:minmax(220px,300px) minmax(0,1fr)" id="r-grid">
@@ -946,8 +953,8 @@ async function viewReports(view, id) {
       <div class="card">${current ? `
         <div class="card-head"><h2>${t("Report #{id}", { id: current.id })}</h2><div class="row">
           <a class="btn sm" href="/api/reports/${current.id}/markdown">${t("Download .md")}</a>
-          <button class="btn sm" id="r-resend" type="button">${t("Send")}</button>
-          <button class="btn sm danger" id="r-del" type="button">${t("Delete")}</button></div></div>
+          <button data-write class="btn sm" id="r-resend" type="button">${t("Send")}</button>
+          <button data-write class="btn sm danger" id="r-del" type="button">${t("Delete")}</button></div></div>
         ${current.delivery.length ? `<div class="pill-row" style="margin-bottom:10px">${current.delivery.map((d) => `<span class="chip" title="${esc(d.detail || "")}">${d.ok ? "✅" : "❌"} ${esc(d.webhook)}${d.skipped ? t(" (skipped)") : ""}</span>`).join("")}</div>` : ""}
         ${md(current.markdown)}` : `<div class="empty">${t("Generate the first report.")}</div>`}</div>
     </div>`;
@@ -977,16 +984,16 @@ async function viewReports(view, id) {
 // ---------------------------------------------------------- environments
 async function viewEnvironments(view) {
   view.innerHTML = `
-    <div class="filters"><div style="flex:1"></div><button class="btn primary" id="e-new" type="button">${t("+ New environment")}</button></div>
+    <div class="filters"><div style="flex:1"></div><button data-write class="btn primary" id="e-new" type="button">${t("+ New environment")}</button></div>
     <div class="grid cols-3">${S.envs.map((e, i) => `<div class="card">
       <div class="card-head"><div class="row"><i style="width:10px;height:10px;border-radius:3px;background:${envColor(e.id)};display:inline-block"></i><h2 style="margin:0">${esc(e.name)}</h2></div><span class="sub">${t("order {n}", { n: e.sort_order })}</span></div>
       ${e.description ? `<p class="muted" style="margin-top:0">${esc(e.description)}</p>` : ""}
       <div class="small"><span class="muted">Prometheus:</span> ${e.prometheus_url ? `<span class="mono">${esc(e.prometheus_url)}</span>` : `<span class="muted">${t("not configured (manual versions only)")}</span>`}</div>
       ${e.prometheus_url ? `<div class="small"><span class="muted">${t("Authentication:")}</span> ${esc(e.prometheus_auth)}${e.prometheus_extra_selector ? ` · <span class="muted">${t("selector:")}</span> <span class="mono">${esc(e.prometheus_extra_selector)}</span>` : ""}</div>` : ""}
       <div class="row" style="margin-top:12px">
-        ${e.prometheus_url ? `<button class="btn sm" data-test="${e.id}" type="button">${t("Test connection")}</button>` : ""}
-        <button class="btn sm" data-edit="${e.id}" type="button">${t("Edit")}</button>
-        <button class="btn sm danger" data-del="${e.id}" type="button">${t("Delete")}</button>
+        ${e.prometheus_url ? `<button data-write class="btn sm" data-test="${e.id}" type="button">${t("Test connection")}</button>` : ""}
+        <button data-write class="btn sm" data-edit="${e.id}" type="button">${t("Edit")}</button>
+        <button data-write class="btn sm danger" data-del="${e.id}" type="button">${t("Delete")}</button>
       </div>
       <div class="small" data-out="${e.id}" style="margin-top:8px"></div>
     </div>`).join("") || `<div class="card empty">${t("No environments. Create, for example, “development” and “production”.")}</div>`}</div>`;
@@ -1040,14 +1047,14 @@ function envForm(e = null) {
 async function viewWebhooks(view) {
   const hooks = await api("/api/webhooks");
   view.innerHTML = `
-    <div class="filters"><span class="muted">${t("The weekly report is sent to every active webhook.")}</span><div style="flex:1"></div><button class="btn primary" id="w-new" type="button">${t("+ New webhook")}</button></div>
+    <div class="filters"><span class="muted">${t("The weekly report is sent to every active webhook.")}</span><div style="flex:1"></div><button data-write class="btn primary" id="w-new" type="button">${t("+ New webhook")}</button></div>
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>${t("Name")}</th><th>${t("Type")}</th><th>URL</th><th>${t("Environments")}</th><th>${t("Last delivery")}</th><th></th></tr></thead>
       <tbody>${hooks.map((w) => `<tr><td><b>${esc(w.name)}</b> ${w.enabled ? "" : `<span class="chip">${t("disabled")}</span>`}${w.only_outdated ? ` <span class="chip">${t("only when something is pending")}</span>` : ""}${w.alert_major || w.alert_security || w.alert_overdue_days ? ` <span class="chip">${t("alerts")}</span>` : ""}</td>
         <td>${esc(S.meta.webhook_kinds[w.kind] || w.kind)}</td><td class="mono small">${esc(w.url)}</td>
         <td class="small">${w.environment_ids.length ? w.environment_ids.map(envName).map(esc).join(", ") : t("all")}</td>
         <td class="small">${w.last_sent_at ? `${fmtDate(w.last_sent_at, true)}<div class="muted">${esc(w.last_status || "")}</div>` : `<span class="muted">${t("never")}</span>`}</td>
-        <td class="nowrap right"><button class="btn sm" data-test="${w.id}" type="button">${t("Test")}</button> <button class="btn sm" data-edit="${w.id}" type="button">${t("Edit")}</button> <button class="btn sm danger" data-del="${w.id}" type="button">${t("Delete")}</button></td></tr>`).join("") || `<tr><td colspan="6" class="empty">${t("No webhook configured.")}</td></tr>`}</tbody>
+        <td class="nowrap right"><button data-write class="btn sm" data-test="${w.id}" type="button">${t("Test")}</button> <button data-write class="btn sm" data-edit="${w.id}" type="button">${t("Edit")}</button> <button data-write class="btn sm danger" data-del="${w.id}" type="button">${t("Delete")}</button></td></tr>`).join("") || `<tr><td colspan="6" class="empty">${t("No webhook configured.")}</td></tr>`}</tbody>
     </table></div></div>`;
   $("#w-new", view).addEventListener("click", () => hookForm());
   $$("[data-edit]", view).forEach((b) => b.addEventListener("click", () => hookForm(hooks.find((w) => w.id === Number(b.dataset.edit)))));
@@ -1100,7 +1107,7 @@ async function viewDiscover(view) {
       ${field(t("Environment"), `<select id="dc-env">${envs.map((e) => opt(e.id, e.name, st.env)).join("")}</select>`)}
       ${field("Namespace", `<input id="dc-ns" value="${esc(st.namespace)}" placeholder="${t("empty = all")}">`)}
       <button class="btn primary" type="submit" style="margin-top:18px">${t("Discover")}</button>
-      <button class="btn" type="button" id="dc-all" style="margin-top:18px" hidden>${t("Monitor all")}</button>
+      <button data-write class="btn" type="button" id="dc-all" style="margin-top:18px" hidden>${t("Monitor all")}</button>
       <span class="small muted" style="margin-top:18px">${t("Groups the workloads by Helm release (Secrets <code>sh.helm.release.v1.*</code> and label <code>app.kubernetes.io/instance</code>).")}</span>
     </form>
     <div id="dc-out"></div>`;
@@ -1108,7 +1115,7 @@ async function viewDiscover(view) {
   const comps = () => st.result.groups.flatMap((g) => g.components.map((c) => ({ g, c })));
   const trackBtn = (c, key) => c.project
     ? `<a class="btn sm" href="#/apps/${c.project.id}">${t("Monitored: {name}", { name: esc(c.project.name) })}</a>`
-    : `<button class="btn sm primary" type="button" data-track="${key}">${t("Monitor")}</button>`;
+    : `<button data-write class="btn sm primary" type="button" data-track="${key}">${t("Monitor")}</button>`;
   const draw = () => {
     const r = st.result;
     if (!r) return;
@@ -1200,7 +1207,7 @@ async function viewSettings(view) {
     <div class="form-grid">
       ${toleranceFields(c)}
     </div>
-    <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">${t("Save")}</button></div>
+    <div class="row" style="margin-top:14px"><button data-write class="btn primary" type="submit">${t("Save")}</button></div>
   </form>`;
   $("#st-form", view).addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1279,6 +1286,15 @@ function applyStatic() {
   renderRefreshInfo();
 }
 
+/** Logged-in user and sign-out button; read-only users get the write controls hidden (styles.css). */
+function applyUser(me) {
+  document.documentElement.classList.toggle("read-only", !me.can_edit);
+  const info = $("#user-info");
+  info.hidden = !me.name;
+  info.textContent = me.name ? (me.can_edit ? me.name : `${me.name} · ${t("read-only")}`) : "";
+  $("#logout-form").hidden = me.auth !== "oidc";
+}
+
 function initTheme() {
   const root = document.documentElement, box = $("#theme-toggle");
   box.checked = root.dataset.theme === "dark";
@@ -1300,6 +1316,7 @@ async function init() {
     $("#view").innerHTML = `<div class="card err">${t("Could not connect to the API: {error}", { error: esc(e.message) })}</div>`;
     return;
   }
+  applyUser(await api("/api/me"));
   S.refresh = await api("/api/refresh/status");
   renderRefreshInfo();
   if (S.refresh.running) pollRefresh();

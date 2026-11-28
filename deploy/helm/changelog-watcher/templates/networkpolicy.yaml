@@ -21,6 +21,11 @@ spec:
     # /metrics scrape by Prometheus.
     - from: [{{ toJson $peer }}]
       ports: [{port: http}]
+    {{- if $.Values.frontend.enabled }}
+    # The frontend's nginx (UI and API proxy).
+    - from: [{podSelector: {matchLabels: {{ include "cw.frontendSelectorLabels" $ | fromYaml | toJson }}}}]
+      ports: [{port: http}]
+    {{- end }}
     {{- with .allowIngressFrom }}
     # Other allowed sources (ingress controller etc.).
     - from: {{- toYaml . | nindent 8 }}

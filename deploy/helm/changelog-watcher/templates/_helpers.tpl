@@ -27,6 +27,20 @@ app.kubernetes.io/name: {{ include "cw.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{/* Frontend: another name, so the backend's selectors (Service, NetworkPolicy, ServiceMonitor)
+     never match its pods or Service. */}}
+{{- define "cw.frontendSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "cw.name" . }}-frontend
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "cw.frontendLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
+{{ include "cw.frontendSelectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.Version | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
 {{- define "cw.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "cw.fullname" .) .Values.serviceAccount.name -}}
@@ -52,7 +66,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/* Service the Ingress/IngressRoute/HTTPRoute sends traffic to: the frontend (nginx, which
      proxies the API to the backend) when enabled, else the backend. Both use service.port. */}}
 {{- define "cw.routeService" -}}
-{{ include "cw.fullname" . }}{{ if (.Values.frontend | default dict).enabled }}-frontend{{ end }}
+{{ include "cw.fullname" . }}{{ if .Values.frontend.enabled }}-frontend{{ end }}
 {{- end -}}
 
 {{/* IngressRoute/HTTPRoute: at least one host, only Prefix/Exact paths, and no backticks (they
