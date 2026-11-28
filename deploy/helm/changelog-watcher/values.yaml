@@ -14,6 +14,19 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # The API token is only mounted when needed: rbac.create, or this flag when you bring your own RBAC.
+  automountToken: false
+
+# Read-only access to the Kubernetes API of this cluster (get on Deployments, StatefulSets,
+# DaemonSets, Argo CD Applications and Flux HelmReleases), so a deployment's version source can be
+# "Kubernetes API", "Argo CD" or "Flux" instead of Prometheus. Off by default.
+# With networkPolicy on, also allow the egress to the API server (the chart does not know its address).
+rbac:
+  create: false
+  # [] = one ClusterRole (every namespace). Otherwise a Role + RoleBinding in each listed namespace.
+  namespaces: []
+  #  - production
+  #  - argocd
 
 podAnnotations: {}
 podLabels: {}
@@ -146,13 +159,36 @@ secrets:
 
 # Basic auth of the UI/API (/healthz and /readyz stay open; /metrics, see metrics.token).
 # Without password or existingSecret, a random password is generated in the Secret (see the
-# release NOTES). enabled=false leaves the API open (AUTH_DISABLED=true): local tests only.
+# release NOTES). enabled=false and oidc.enabled=false leave the API open (AUTH_DISABLED=true):
+# local tests only.
 # Always serve the UI over TLS (ingress.tls): Basic Auth sends the password on every request.
 auth:
   enabled: true
   username: admin
   password: ""
   existingSecret: ""      # keys AUTH_USERNAME and AUTH_PASSWORD
+  # Default: Basic Auth (above). SSO login via OIDC (e.g. Dex) is optional: uncomment the block
+  # below. Works alongside Basic Auth (for API clients) or alone
+  # (auth.enabled=false). Requires config.publicUrl (redirect URI: <publicUrl>/auth/callback)
+  # and HTTPS. The pod must reach issuerUrl (see networkPolicy).
+  # oidc:
+  #   enabled: true
+  #   issuerUrl: ""         # e.g. https://dex.example.com/dex (exactly the provider's "issuer")
+  #   clientId: changelog-watcher
+  #   clientSecret: ""      # stored in the chart Secret as OIDC_CLIENT_SECRET
+  #   # Existing Secret with the keys OIDC_CLIENT_SECRET and SESSION_SECRET (instead of the above;
+  #   # without it, SESSION_SECRET is generated in the chart Secret and kept across upgrades via
+  #   # `lookup`). Use it with Argo CD/GitOps/`helm template`: there `lookup` is empty, so a
+  #   # generated SESSION_SECRET changes on every sync and logs everyone out. Also required with
+  #   # secrets.create=false or secrets.existingSecret.
+  #   existingSecret: ""
+  #   scopes: openid email profile groups
+  #   # Members of editorGroups can change everything; of viewerGroups, only read (other users: 403).
+  #   editorGroups: []
+  #   viewerGroups: []
+  #   # Signing out does not revoke sessions already issued (stateless cookie): they last until
+  #   # they expire; rotating SESSION_SECRET ends all of them.
+  #   sessionMaxAgeHours: 12
 
 # Initial configuration (seed) – environments, applications and webhooks.
 # Loaded on every start; by default it only creates what does not exist yet.

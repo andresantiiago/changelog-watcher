@@ -36,9 +36,11 @@ server {
     }
 
     # The UI asks for the same credentials as the API: the backend checks each request (/_auth)
-    # and, on a 401, auth_request passes its Basic Auth challenge on to the browser.
+    # and, on a 401, answers the original request itself (@backend): the Basic Auth challenge,
+    # or with OIDC the redirect to /auth/login (an /api 401 has neither).
     location = / {
         auth_request /_auth;
+        error_page 401 = @backend;
         try_files /index.html =404;
         expires epoch;  # Cache-Control: no-cache (revalidate with ETag)
     }
@@ -46,6 +48,7 @@ server {
     # No content hash in the file names: revalidated (304) so a new UI applies on the next reload.
     location /static/ {
         auth_request /_auth;
+        error_page 401 = @backend;
         expires epoch;
     }
 
@@ -60,6 +63,13 @@ server {
     location / {
         proxy_pass ${BACKEND_URL};
         # Original Host: the backend's same-origin (CSRF) check compares it with Origin.
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    }
+
+    location @backend {
+        proxy_pass ${BACKEND_URL};
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;

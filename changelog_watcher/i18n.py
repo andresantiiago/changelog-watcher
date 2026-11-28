@@ -133,6 +133,18 @@ _PT_BR: dict[str, str] = {
     "query error: {error}": "erro na consulta: {error}",
     "no series found for: {query}": "nenhuma série encontrada para: {query}",
     "could not extract a version from image '{image}'": "não foi possível extrair versão da imagem '{image}'",
+    # kubernetes api / argo cd / flux
+    "Kubernetes API unavailable: the app must run in a cluster with a ServiceAccount token": "API do Kubernetes indisponível: o app precisa rodar em um cluster com token de ServiceAccount",
+    "failed to query the Kubernetes API: {error}": "falha ao consultar a API do Kubernetes: {error}",
+    "{what} not found in the Kubernetes API": "{what} não encontrado na API do Kubernetes",
+    "no permission to read {what}: check the ServiceAccount's RBAC": "sem permissão para ler {what}: confira o RBAC da ServiceAccount",
+    "Kubernetes API answered HTTP {status}": "API do Kubernetes respondeu HTTP {status}",
+    "invalid response: not the Kubernetes API": "resposta inválida: não é a API do Kubernetes",
+    "container '{container}' not found in {what}": "container '{container}' não encontrado em {what}",
+    "{what} has several containers: set the container name": "{what} tem vários containers: defina o nome do container",
+    "invalid namespace or name: use a DNS-1123 name (lowercase letters, digits, '-' and '.')": "namespace ou nome inválido: use um nome DNS-1123 (letras minúsculas, dígitos, '-' e '.')",
+    "workload type '{kind}' is not supported with the Kubernetes API": "tipo de workload '{kind}' não suportado pela API do Kubernetes",
+    "could not extract a version from {what}": "não foi possível extrair versão de {what}",
     # eol
     "unexpected response from endoflife.date (product list)": "resposta inesperada do endoflife.date (lista de produtos)",
     "invalid product: {product}": "produto inválido: {product}",
@@ -212,4 +224,12 @@ _PT_BR: dict[str, str] = {
     "empty URL": "URL vazia",
     "{n} message(s) sent": "{n} mensagem(ns) enviada(s)",
     "ERROR": "ERRO",
+    # auth
+    "read-only access": "acesso somente leitura",
+    "Sign in": "Entrar",
+    "The identity provider is unavailable, try again later.": "O provedor de identidade está indisponível, tente novamente mais tarde.",
+    "Login expired or invalid, sign in again.": "Login expirado ou inválido, entre novamente.",
+    "Login failed.": "Falha no login.",
+    "Your account is not in a group allowed to use Changelog Watcher.": "Sua conta não está em um grupo com acesso ao Changelog Watcher.",
+    "You have signed out.": "Você saiu.",
 }

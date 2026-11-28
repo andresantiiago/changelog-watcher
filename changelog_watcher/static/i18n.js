@@ -99,7 +99,9 @@ const I18N = {
     "disabled": "desativada",
     "Discover": "Descobrir",
     "Discover in the cluster": "Descobrir no cluster",
-    "Discover the version in use via Prometheus": "Descobrir versão em uso via Prometheus",
+    "Discover the version in use": "Descobrir versão em uso",
+    "Kubernetes API": "API do Kubernetes",
+    "With Kubernetes API, Argo CD or Flux as the version source (Environments, below), the namespace and name point to the workload, the Argo CD Application or the Flux HelmRelease.": "Com API do Kubernetes, Argo CD ou Flux como origem da versão (Ambientes, abaixo), o namespace e o nome apontam para o workload, a Application do Argo CD ou o HelmRelease do Flux.",
     "Display order": "Ordem de exibição",
     "divergent": "divergente",
     "Download .md": "Baixar .md",
@@ -362,6 +364,9 @@ const I18N = {
     "{ok}/{total} deliveries ok": "{ok}/{total} envios ok",
     "↻ Fetch releases": "↻ Buscar releases",
     "⚠ detection failed": "⚠ detecção falhou",
+    "read-only": "somente leitura",
+    "Session expired": "Sessão expirada",
+    "Sign out": "Sair",
   },
 };
 
