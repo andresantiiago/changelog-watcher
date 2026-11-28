@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import respx
@@ -10,7 +10,7 @@ from changelog_watcher.models import Project
 from changelog_watcher.versioning import parse_version
 
 API = "https://endoflife.date/api"
-TODAY = date.today()
+TODAY = datetime.now(UTC).date()  # the app counts days in UTC, not local time
 
 
 def _d(days: int) -> str:
