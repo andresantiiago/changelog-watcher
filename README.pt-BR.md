@@ -185,8 +185,10 @@ os campos) e o **Namespace**/**nome** (sobrescrevíveis por ambiente) apontam pa
 
 Faixas (`1.2.*`), branches e commits são ignorados. O regex de **Padrão de versão** também vale.
 É preciso uma ServiceAccount com RBAC somente leitura: `rbac.create=true` no chart Helm (um
-ClusterRole, ou Roles nos namespaces de `rbac.namespaces`). Erros (não encontrado, sem permissão,
-fora de um cluster...) aparecem como erro de detecção do deployment, e **Testar detecção** funciona
+ClusterRole, ou Roles nos namespaces de `rbac.namespaces`). Prefira listar os namespaces: o
+ClusterRole deixa o pod ler as specs dos workloads e os Helm values do Argo CD/Flux em todos os
+namespaces, e eles costumam ter segredos em texto puro. Erros (não encontrado, sem permissão, fora
+de um cluster...) aparecem como erro de detecção do deployment, e **Testar detecção** funciona
 igual. Com NetworkPolicies ativas, libere também o egress para o API server.
 
 ### Releases Helm e descoberta no cluster

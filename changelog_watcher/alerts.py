@@ -28,9 +28,8 @@ SECURITY_RE = re.compile(r"\bsecurity\b|\bCVE-\d{4}-\d{4,}\b|vulnerab|segurança
 ICONS = {"major": "🔴", "security": "🛡️", "overdue": "⏰"}
 
 
-def find_alerts(session: Session, webhook: Webhook, statuses=None) -> list[dict]:
+def find_alerts(session: Session, webhook: Webhook, statuses: list) -> list[dict]:
     """Alerts this webhook's rules raise now (already-sent ones included)."""
-    statuses = compute_statuses(session) if statuses is None else statuses
     envs = set(webhook.environment_ids or [])  # empty = all environments
     versions_cache: dict[int, dict] = {}
     out = []
@@ -79,7 +78,7 @@ def alert_lines(alerts: list[dict]) -> list[str]:
         reason = {
             "major": _("new major version"),
             "security": _("release mentions a security fix"),
-            "overdue": _("outdated for {n} days", n=a.get("days")),
+            "overdue": _("outdated for {n} days", n=a["days"]),
         }[a["rule"]]
         lines.append(
             f"• {ICONS[a['rule']]} {a['environment']} · {a['project']} "
